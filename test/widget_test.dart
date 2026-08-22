@@ -176,6 +176,54 @@ void main() {
     expect(HmdApp.theme('green').scaffoldBackgroundColor, const Color(0xFFCDE8CF));
   });
 
+  testWidgets('阅读页：长文慢速拖动可滚动（嵌套滚动回归）', (t) async {
+    final buf = StringBuffer('# 长文');
+    for (var i = 1; i <= 60; i++) {
+      buf.write("\n\n");
+      buf.write('第 $i 段：白日依山尽，黄河入海流。');
+    }
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: ReaderScreen(path: 't.md', title: 't滚.md', initialContent: buf.toString()),
+    ));
+    await t.pumpAndSettle();
+    final pos = t.state<ScrollableState>(find.byType(Scrollable).first).position;
+    expect(pos.pixels, 0);
+    await t.timedDrag(find.byType(Scrollable).first, const Offset(0, -400), const Duration(milliseconds: 800));
+    await t.pumpAndSettle();
+    expect(pos.pixels, greaterThan(0));
+  });
+
+  test('selectedOf 按 selection 区间截取选中文本', () {
+    const full = '你好世界正文OK';
+    expect(selectedOf(full, const TextSelection(baseOffset: 2, extentOffset: 4)), '世界');
+    expect(selectedOf(full, const TextSelection.collapsed(offset: 2)), '');
+    expect(selectedOf(null, const TextSelection(baseOffset: 0, extentOffset: 1)), '');
+  });
+
+  testWidgets('阅读页：长按进入选择模式显示浮条，点完成退出', (t) async {
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't模式.md', initialContent: '# 标\n\n你好世界正文OK',
+      ),
+    ));
+    await t.pumpAndSettle();
+    expect(find.text('完成'), findsNothing); // 无浮条
+    final g = await t.startGesture(const Offset(540, 500));
+    await t.pump(const Duration(milliseconds: 600));
+    await g.up();
+    await t.pumpAndSettle();
+    expect(find.text('划线'), findsOneWidget);
+    expect(find.text('高亮'), findsOneWidget);
+    expect(find.text('完成'), findsOneWidget);
+    await t.pump(const Duration(milliseconds: 4300)); // 等 SnackBar 消失
+    await t.pumpAndSettle();
+    await t.tap(find.text('完成'));
+    await t.pumpAndSettle();
+    expect(find.text('完成'), findsNothing);
+  });
+
   testWidgets('阅读页：预置划线渲染为波浪线（TextSpan 层）', (t) async {
     final m = Mark('m2', '世界', '你好，', '。', 1, false, false, 0);
     await saveMarks('t划线.md', [m]);
@@ -186,7 +234,7 @@ void main() {
       ),
     ));
     await t.pumpAndSettle();
-    expect(find.byWidgetPredicate((w) => w is RichText && _hasWavy(w.text)), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => (w is SelectableText && w.textSpan != null ? _hasWavy(w.textSpan!) : (w is RichText && _hasWavy(w.text)))), findsOneWidget);
   });
 
   testWidgets('阅读页：跨段旧锚点仍能渲染（退化匹配）', (t) async {
@@ -201,7 +249,7 @@ void main() {
       ),
     ));
     await t.pumpAndSettle();
-    expect(find.byWidgetPredicate((w) => w is RichText && _hasBg(w.text)), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => (w is SelectableText && w.textSpan != null ? _hasBg(w.textSpan!) : (w is RichText && _hasBg(w.text)))), findsOneWidget);
   });
 
   testWidgets('阅读页：预置标注渲染为高亮色块（TextSpan 层）', (t) async {
@@ -214,6 +262,6 @@ void main() {
       ),
     ));
     await t.pumpAndSettle();
-    expect(find.byWidgetPredicate((w) => w is RichText && _hasBg(w.text)), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => (w is SelectableText && w.textSpan != null ? _hasBg(w.textSpan!) : (w is RichText && _hasBg(w.text)))), findsOneWidget);
   });
 }

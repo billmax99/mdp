@@ -7,7 +7,6 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:hmd/build_info.dart';
@@ -290,6 +289,13 @@ String injectHtmlSearch(String html, String q) {
         '<span style="background-color:#FFB86B">${s.substring(a, b)}</span>');
   }
   return s;
+}
+
+// flutter_markdown 的 onSelectionChanged 回调 text 是整块全文，按 selection 区间截取选中部分
+String selectedOf(String? text, TextSelection selection) {
+  final src = text ?? '';
+  if (selection.isCollapsed) return '';
+  return src.substring(selection.start.clamp(0, src.length), selection.end.clamp(0, src.length));
 }
 
 // 大小写不敏感地找出全部匹配（非重叠）。toLowerCase 后长度变化的罕见字符不做处理。
@@ -636,6 +642,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _pdfCtrl = PdfViewerController();
   PdfTextSearcher? _pdfSearcher;
   bool _pdfSel = false; // pdf 当前有选中文本
+  String _mdSelText = ''; // md 当前选中文字（onSelectionChanged 记录，不依赖剪贴板）
+  // md 默认不可选择（保证滚动流畅）；长按正文进入选择模式，标注完成或点完成后退出
+  bool _selectMode = false;
+  Timer? _lpTimer;
+  Offset? _lpPos;
   bool _searchOpen = false;
   final _searchCtrl = TextEditingController();
   String _query = '';
@@ -700,7 +711,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(milliseconds: 1500)));
   }
 
   // ---- 标注 ----
@@ -778,43 +790,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  // md/epub 共用：系统选择菜单加"划线/高亮"。
-  // ponytail: SelectableRegionState 无公开的取选中文本 API，借道剪贴板
-  // （copySelection → Clipboard.getData），副作用是覆盖系统剪贴板。
-  Widget _selectable(Widget child) => SelectionArea(
-        contextMenuBuilder: (context, selectableRegion) =>
-            AdaptiveTextSelectionToolbar.buttonItems(
-          anchors: selectableRegion.contextMenuAnchors,
-          buttonItems: [
-            ContextMenuButtonItem(
-              label: '划线',
-              onPressed: () {
-                ContextMenuController.removeAny();
-                _markFromSelection(selectableRegion, false);
-              },
-            ),
-            ContextMenuButtonItem(
-              label: '高亮',
-              onPressed: () {
-                ContextMenuController.removeAny();
-                _markFromSelection(selectableRegion, true);
-              },
-            ),
-          ],
-        ),
-        child: child,
-      );
-
-  Future<void> _markFromSelection(SelectableRegionState region, bool hl) async {
-    // ignore: deprecated_member_use
-    region.copySelection(SelectionChangedCause.toolbar);
-    final t = (await Clipboard.getData('text/plain'))?.text ?? '';
-    debugPrint('hmd mark: selected="${t.length > 40 ? t.substring(0, 40) : t}" hl=$hl');
-    region.clearSelection();
-    await _addMark(t, hl);
+  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText（与滚动协调正常），
+  // 选中文本经 onSelectionChanged 直接回调，不依赖系统剪贴板（真机管控下不可靠）。
+  void _onMdSelection(String? text, TextSelection selection, SelectionChangedCause? cause) {
+    final t = selectedOf(text, selection);
+    if (t == _mdSelText) return;
+    if (mounted) setState(() => _mdSelText = t);
   }
 
-  // ---- 全文搜索 ----
+  // ---- 全文搜索 ----  // ---- 全文搜索 ----
 
   int get _searchTotal => _kind == DocKind.epub ? _searchHitChapters.length : _searchHitBlocks.length;
 
@@ -1079,7 +1063,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
           _searchHitChapters.addAll(
               [for (var j = 0; j < findMatches(_html![i], _query).length; j++) i]);
         }
-        return _selectable(ValueListenableBuilder<double>(
+        // epub 不做选择标注（HtmlWidget 无内建选择；外挂 SelectionArea 会与滚动冲突）
+        return ValueListenableBuilder<double>(
           valueListenable: appFont,
           builder: (_, fs, _) => ListView.builder(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -1096,10 +1081,33 @@ class _ReaderScreenState extends State<ReaderScreen> {
               );
             },
           ),
-        ));
+        );
       default: // md / txt / docx
         if (_content == null) return loading;
-        return _selectable(ValueListenableBuilder<double>(
+        // Listener 原始事件自实现长按：不参与手势竞技，绝不干扰 ListView 滚动
+        return Listener(
+          onPointerDown: (e) {
+            _lpPos = e.position;
+            _lpTimer?.cancel();
+            if (!_selectMode) {
+              _lpTimer = Timer(const Duration(milliseconds: 520), () {
+                if (_lpPos != null && mounted) {
+                  setState(() => _selectMode = true);
+                  _toast('选择模式：选中文字后点划线/高亮');
+                }
+              });
+            }
+          },
+          onPointerMove: (e) {
+            if (_lpPos != null && (e.position - _lpPos!).distance > 24) {
+              _lpTimer?.cancel();
+              _lpPos = null;
+            }
+          },
+          onPointerUp: (_) => _lpTimer?.cancel(),
+          onPointerCancel: (_) => _lpTimer?.cancel(),
+          child: Stack(children: [
+          ValueListenableBuilder<double>(
           valueListenable: appFont,
           builder: (_, fs, _) {
             final blocks = splitBlocks(_content!);
@@ -1142,10 +1150,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     if (sp.$3 == 's') bi
                 ]);
               }
-              final w = Markdown(
+              // MarkdownBody 无内部滚动视图；用滚动版 Markdown 会与外层 ListView 抢手势导致无法滚动
+              final w = MarkdownBody(
                 data: data,
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
                 styleSheet: _mdStyle(context, fs),
                 inlineSyntaxes: [MarkSyntax()],
                 builders: {
@@ -1153,6 +1160,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   'hmdU': MarkBuilder('u'),
                   'hmdS': MarkBuilder('s'),
                 },
+                selectable: _selectMode,
+                onSelectionChanged: _onMdSelection,
               );
               children.add(blockKey == null ? w : KeyedSubtree(key: blockKey, child: w));
               if (bi < blocks.length - 1) children.add(const SizedBox(height: 8));
@@ -1162,7 +1171,53 @@ class _ReaderScreenState extends State<ReaderScreen> {
               children: children,
             );
           },
-        ));
+          ),
+          if (_selectMode)
+            Positioned(
+              left: 20,
+              bottom: 24,
+              child: Container(
+                decoration: BoxDecoration(
+                    color: iosBlue, borderRadius: BorderRadius.circular(24)),
+                child: Row(children: [
+                  TextButton(
+                    onPressed: _mdSelText.isEmpty
+                        ? null
+                        : () {
+                            final t = _mdSelText;
+                            setState(() {
+                              _mdSelText = '';
+                              _selectMode = false;
+                            });
+                            _addMark(t, false);
+                          },
+                    child: const Text('划线', style: TextStyle(color: Colors.white, fontSize: 16)),
+                  ),
+                  TextButton(
+                    onPressed: _mdSelText.isEmpty
+                        ? null
+                        : () {
+                            final t = _mdSelText;
+                            setState(() {
+                              _mdSelText = '';
+                              _selectMode = false;
+                            });
+                            _addMark(t, true);
+                          },
+                    child: const Text('高亮', style: TextStyle(color: Colors.white, fontSize: 16)),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _selectMode = false;
+                      _mdSelText = '';
+                    }),
+                    child: const Text('完成', style: TextStyle(color: Colors.white, fontSize: 16)),
+                  ),
+                ]),
+              ),
+            ),
+          ]),
+        );
     }
   }
 
