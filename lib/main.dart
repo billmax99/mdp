@@ -105,8 +105,15 @@ class RecentRec {
       j is Map && j['n'] is String ? RecentRec(j['n'] as String, (j['t'] as num).toInt()) : null;
 }
 
+// 每条独立 try 解析：脏数据只丢该条，不让整个应用崩溃
 List<RecentRec> loadRecent() => (prefs.getStringList('recent') ?? const [])
-    .map((s) => RecentRec.fromJson(jsonDecode(s)))
+    .map((s) {
+      try {
+        return RecentRec.fromJson(jsonDecode(s));
+      } catch (_) {
+        return null;
+      }
+    })
     .whereType<RecentRec>()
     .toList();
 
@@ -189,7 +196,13 @@ class Mark {
 }
 
 List<Mark> loadMarks(String doc) => (prefs.getStringList('marks_$doc') ?? const [])
-    .map((s) => Mark.fromJson(jsonDecode(s)))
+    .map((s) {
+      try {
+        return Mark.fromJson(jsonDecode(s));
+      } catch (_) {
+        return null;
+      }
+    })
     .whereType<Mark>()
     .toList();
 
@@ -660,6 +673,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void initState() {
     super.initState();
     _marks = loadMarks(widget.title);
+    debugPrint('hmd mark: loaded ${_marks.length} marks for ${widget.title}');
     if (widget.initialContent != null) {
       _content = widget.initialContent;
     } else {
@@ -733,6 +747,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
     final m = Mark(DateTime.now().microsecondsSinceEpoch.toString(), text, b, a,
         DateTime.now().millisecondsSinceEpoch, hl, false, page);
+    debugPrint('hmd mark: saved id=${m.id} page=$page marks=${_marks.length + 1}');
     setState(() => _marks = [..._marks, m]);
     await saveMarks(widget.title, _marks);
     _toast(hl ? '已高亮' : '已划线');
@@ -817,6 +832,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     // ignore: deprecated_member_use
     region.copySelection(SelectionChangedCause.toolbar);
     final t = (await Clipboard.getData('text/plain'))?.text ?? '';
+    debugPrint('hmd mark: selected="${t.length > 40 ? t.substring(0, 40) : t}" hl=$hl');
     region.clearSelection();
     await _addMark(t, hl);
   }

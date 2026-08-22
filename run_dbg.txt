@@ -1,0 +1,82 @@
+
+C:\Users\bill\Desktop\test\_ClaudeProJects\glm5\hmd>set HTTP_PROXY=http://127.0.0.1:1080 
+
+C:\Users\bill\Desktop\test\_ClaudeProJects\glm5\hmd>set HTTPS_PROXY=http://127.0.0.1:1080 
+
+C:\Users\bill\Desktop\test\_ClaudeProJects\glm5\hmd>set NO_PROXY=localhost,127.0.0.1,.local 
+Flutter assets will be downloaded from https://storage.flutter-io.cn. Make sure you trust this source!
+Resolving dependencies...
+Downloading packages...
+  archive 3.6.1 (4.1.0 available)
+  code_assets 1.2.1 (2.0.0 available)
+  flutter_markdown 0.7.7+1 (discontinued replaced by flutter_markdown_plus)
+  hooks 2.0.2 (2.2.0 available)
+  image 4.3.0 (4.9.2 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.17.0 (1.19.0 available)
+  objective_c 9.5.0 (9.6.0 available)
+  pdfrx 2.4.5 (2.4.7 available)
+  pdfrx_engine 0.4.4 (0.4.6 available)
+  receive_sharing_intent 1.8.1 (1.9.0 available)
+  record_use 0.6.0 (1.1.1 available)
+  shared_preferences_android 2.4.23 (2.4.27 available)
+  synchronized 3.4.0+1 (3.4.1+2 available)
+  test_api 0.7.10 (0.7.13 available)
+  url_launcher_android 6.3.30 (6.3.32 available)
+  vector_math 2.2.0 (2.4.2 available)
+  xml 6.6.1 (7.0.1 available)
+Got dependencies!
+1 package is discontinued.
+18 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib\main.dart on sdk gphone64 x86 64 in debug mode...
+Running Gradle task 'assembleDebug'...                          
+
+C:\Users\bill\Desktop\test\_ClaudeProJects\glm5\hmd>set HTTP_PROXY=http://127.0.0.1:1080 
+
+C:\Users\bill\Desktop\test\_ClaudeProJects\glm5\hmd>set HTTPS_PROXY=http://127.0.0.1:1080 
+
+C:\Users\bill\Desktop\test\_ClaudeProJects\glm5\hmd>set NO_PROXY=localhost,127.0.0.1,.local 
+Flutter assets will be downloaded from https://storage.flutter-io.cn. Make sure you trust this source!
+Running Gradle task 'assembleDebug'...                             75.9s
+√ Built build\app\outputs\flutter-apk\app-debug.apk
+Installing build\app\outputs\flutter-apk\app-debug.apk...        1,032ms
+Error: ADB exited with exit code 1
+Performing Streamed Install
+
+adb.exe: failed to install C:\Users\bill\Desktop\test\_ClaudeProJects\glm5\hmd\build\app\outputs\flutter-apk\app-debug.apk: Failure [INSTALL_FAILED_VERSION_DOWNGRADE: Downgrade detected: Update version code 6 is older than current 4006]
+Uninstalling old version...
+Installing build\app\outputs\flutter-apk\app-debug.apk...           3.6s
+D/FlutterJNI(12441): Beginning load of flutter...
+D/FlutterJNI(12441): flutter (null) was loaded normally!
+I/flutter (12441): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+D/FlutterRenderer(12441): Width is zero. 0,0
+Syncing files to device sdk gphone64 x86 64...                     192ms
+
+Flutter run key commands.
+r Hot reload. 
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on sdk gphone64 x86 64 is available at: http://127.0.0.1:10193/LuakjzAaJBY=/
+The Flutter DevTools debugger and profiler on sdk gphone64 x86 64 is available at: http://127.0.0.1:10193/LuakjzAaJBY=/devtools/?uri=ws://127.0.0.1:10193/LuakjzAaJBY=/ws
+I/Choreographer(12441): Skipped 155 frames!  The application may be doing too much work on its main thread.
+I/com.bill.hmd(12441): Compiler allocated 5042KB to compile void android.view.ViewRootImpl.performTraversals()
+I/WindowExtensionsImpl(12441): Initializing Window Extensions, vendor API level=9, activity embedding enabled=true
+D/FlutterRenderer(12441): Width is zero. 0,0
+D/FlutterJNI(12441): Sending viewport metrics to the engine.
+D/ProfileInstaller(12441): Installing profile for com.bill.hmd
+I/Choreographer(12441): Skipped 54 frames!  The application may be doing too much work on its main thread.
+D/WindowLayoutComponentImpl(12441): Register WindowLayoutInfoListener on Context=com.bill.hmd.MainActivity@58527a1, of which baseContext=android.app.ContextImpl@5ca29d9
+D/FlutterJNI(12441): Sending viewport metrics to the engine.
+D/InsetsController(12441): hide(ime(), fromIme=false)
+I/ImeTracker(12441): com.bill.hmd:3f88d893: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+I/flutter (12441): hmd mark: loaded 0 marks for 测试.md
+I/com.bill.hmd(12441): AssetManager2(0x752bb8e8eaf8) locale list changing from [] to [en-US]
+W/WindowOnBackDispatcher(12441): sendCancelIfRunning: isInProgress=false callback=io.flutter.embedding.android.FlutterActivity$1@7fc8476
+I/flutter (12441): hmd mark: loaded 0 marks for 测试.md
+Lost connection to device.
