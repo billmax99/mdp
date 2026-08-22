@@ -7,6 +7,8 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:hmd/build_info.dart';
@@ -254,14 +256,9 @@ class MarkBuilder extends MarkdownElementBuilder {
     final base = parentStyle ?? preferredStyle ?? TextStyle(fontSize: appFont.value, height: 1.7);
     final TextStyle st;
     if (kind == 'u') {
-      // ponytail: TextDecorationStyle.wavy 在 span 合并管线退化为细直线（实测像素平直），
-      // 故用"淡蓝底色+粗实线下划线"双重视觉，可靠醒目；要真波浪需自绘叠加层
-      st = base.copyWith(
-        background: Paint()..color = ulBlue.withValues(alpha: 0.18),
-        decoration: TextDecoration.underline,
-        decorationColor: ulBlue,
-        decorationThickness: 5,
-      );
+      // 划线 span 不带任何视觉样式（排版中性）；波浪线由顶层自绘层按实测矩形绘制，
+      // 点击删除/复制也基于同一套矩形命中（引擎的 wavy 装饰实测不渲染，不可用）
+      st = base;
     } else {
       st = base.copyWith(
           background: Paint()
@@ -643,6 +640,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
   int _searchIdx = 0;
+  // 已标注文字的屏幕矩形（跨行多条）：波浪自绘 + 点击命中共用；
+  // 用 ValueNotifier 只触发 CustomPaint 重绘，避免 setState 循环
+  final _rectNotifier = ValueNotifier<List<(Mark, Rect)>>(const []);
+  final _mdScroll = ScrollController();
+  bool _measureScheduled = false;
+  Offset? _lastTapDown;
 
   DocKind get _kind => kindOf(widget.title);
 
@@ -650,6 +653,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void initState() {
     super.initState();
     _marks = loadMarks(widget.title);
+    _mdScroll.addListener(_scheduleMeasure);
     if (widget.initialContent != null) {
       _content = widget.initialContent;
     } else {
@@ -660,6 +664,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _mdScroll.dispose();
+    _rectNotifier.dispose();
     _pdfSearcher?.dispose();
     super.dispose();
   }
@@ -701,12 +707,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     prefs.setDouble('fontSize', n);
   }
 
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), duration: const Duration(milliseconds: 1500)));
-  }
-
   // ---- 标注 ----
 
   Future<void> _addMark(String text, bool hl) async {
@@ -738,7 +738,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
         DateTime.now().millisecondsSinceEpoch, hl, false, page);
     setState(() => _marks = [..._marks, m]);
     await saveMarks(widget.title, _marks);
-    _toast(hl ? '已高亮' : '已划线');
   }
 
   Future<void> _addPdfMark(bool hl) async {
@@ -755,7 +754,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
         DateTime.now().millisecondsSinceEpoch, hl, true, page);
     setState(() => _marks = [..._marks, m]);
     await saveMarks(widget.title, _marks);
-    _toast(hl ? '已高亮（第 $page 页）' : '已划线（第 $page 页）');
   }
 
   Future<void> _deleteMark(Mark m) async {
@@ -789,7 +787,119 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText（与滚动协调正常），
+  // post-frame 实测每条标注文字的屏幕矩形：遍历各块 SelectableText 内的 RenderEditable，
+  // 在 span 树中找带背景（高亮）或纯文本边界（划线标记 span 无样式，用块内标注文本匹配），
+  // 得到矩形后既供自绘波浪层使用，也作为"点击已标注弹菜单"的命中区域。
+  void _scheduleMeasure() {
+    if (_measureScheduled || !mounted) return;
+    _measureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measureScheduled = false;
+      if (!mounted) return;
+      final out = <(Mark, Rect)>[];
+      for (final key in _blockKeys.values) {
+        final ctx = key.currentContext;
+        if (ctx == null) continue;
+        // plus 包的 selectable 底层可能是 RenderEditable 或 RenderParagraph，两者都收
+        final res = <dynamic>[];
+        void visit(RenderObject ro) {
+          if (ro is RenderEditable || ro is RenderParagraph) res.add(ro);
+          ro.visitChildren(visit);
+        }
+        final ro = ctx.findRenderObject();
+        if (ro is RenderEditable || ro is RenderParagraph) res.add(ro);
+        ro?.visitChildren(visit);
+        for (final re in res) {
+          _collectMarkRects(re, out);
+        }
+      }
+      if (mounted && !_sameRects(_rectNotifier.value, out)) _rectNotifier.value = out;
+    });
+  }
+
+  static bool _sameRects(List<(Mark, Rect)> a, List<(Mark, Rect)> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].$1.id != b[i].$1.id || a[i].$2 != b[i].$2) return false;
+    }
+    return true;
+  }
+
+  void _collectMarkRects(dynamic re, List<(Mark, Rect)> out) {
+    // 遍历 span 树，累计文字偏移，匹配标注文本片段
+    final pending = <(int, String)>[]; // (起始偏移, 文本)
+    int spanLength(InlineSpan sp) {
+      if (sp is TextSpan) {
+        var n = (sp.text ?? '').length;
+        for (final c in sp.children ?? const <InlineSpan>[]) {
+          n += spanLength(c);
+        }
+        return n;
+      }
+      return 0;
+    }
+    void walk(InlineSpan sp, int offset) {
+      if (sp is TextSpan) {
+        final txt = sp.text ?? '';
+        if (txt.isNotEmpty) pending.add((offset, txt)); // 高亮/划线 span 都要：定位与命中均需要
+        var off = offset + txt.length;
+        for (final c in sp.children ?? const <InlineSpan>[]) {
+          walk(c, off);
+          off += spanLength(c);
+        }
+      }
+    }
+    walk(re.text ?? const TextSpan(text: ''), 0);
+    if (pending.isEmpty) return;
+    final plain = pending.map((e) => e.$2).join();
+    for (final m in _marks.where((m) => !m.isPdf)) {
+      final idx = plain.indexOf(m.text);
+      if (idx < 0) continue;
+      // 把 plain 偏移换算回 pending 片段的 (span内偏移, 片段序号)
+      var acc = 0;
+      for (final (off, seg) in pending) {
+        final rel = idx - acc;
+        if (rel < 0) break;
+        if (rel < seg.length) {
+          final boxes = re.getBoxesForSelection(TextSelection(
+              baseOffset: off + rel.clamp(0, seg.length),
+              extentOffset: off + (rel + m.text.length).clamp(0, seg.length)));
+          final origin = re.localToGlobal(Offset.zero);
+          for (final b in boxes) {
+            out.add((m, Rect.fromLTWH(origin.dx + b.left, origin.dy + b.top, b.right - b.left, b.bottom - b.top)));
+          }
+          break;
+        }
+        acc += seg.length;
+      }
+    }
+  }
+
+  // 点击已标注文字：弹复制/删除菜单
+  void _onBodyTap(Offset pos) {
+    for (final (m, r) in _rectNotifier.value) {
+      if (r.inflate(8).contains(pos)) {
+        final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+        showMenu<String>(
+          context: context,
+          position: RelativeRect.fromLTRB(pos.dx, r.top - 48, overlay.size.width - r.right, 0),
+          items: const [
+            PopupMenuItem(value: 'copy', height: 52, child: Text('复制', style: TextStyle(fontSize: 17))),
+            PopupMenuItem(value: 'del', height: 52, child: Text('删除标注', style: TextStyle(fontSize: 17))),
+          ],
+        ).then((v) {
+          if (v == 'copy') {
+            Clipboard.setData(ClipboardData(text: m.text));
+          } else if (v == 'del') {
+            _deleteMark(m);
+          }
+        });
+        return;
+      }
+    }
+  }
+
+  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText（与滚动协调正常），
   // 选中文本经 onSelectionChanged 直接回调，不依赖系统剪贴板（真机管控下不可靠）。
   void _onMdSelection(String? text, TextSelection selection, SelectionChangedCause? cause) {
     final t = selectedOf(text, selection);
@@ -810,17 +920,23 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _addMark(t, hl);
     }
 
-    return AdaptiveTextSelectionToolbar.buttonItems(
+    Widget bigBtn(String label, VoidCallback onTap) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.black87,
+              textStyle: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            ),
+            onPressed: onTap,
+            child: Text(label),
+          ),
+        );
+    return AdaptiveTextSelectionToolbar(
       anchors: editor.contextMenuAnchors,
-      buttonItems: [
-        ContextMenuButtonItem(
-          label: '划线',
-          onPressed: () => mark(false),
-        ),
-        ContextMenuButtonItem(
-          label: '高亮',
-          onPressed: () => mark(true),
-        ),
+      children: [
+        bigBtn('划线', () => mark(false)),
+        bigBtn('高亮', () => mark(true)),
       ],
     );
   }
@@ -1132,8 +1248,23 @@ class _ReaderScreenState extends State<ReaderScreen> {
         );
       default: // md / txt / docx
         if (_content == null) return loading;
+        _scheduleMeasure(); // 每帧布局后重测标注矩形（波浪层与点击命中共用）
         return Stack(children: [
-          ValueListenableBuilder<double>(
+          // 波浪线自绘层：按实测矩形绘制，置于文字之下、不拦截触摸
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: _WavyPainter(_rectNotifier)),
+            ),
+          ),
+          Listener(
+            onPointerUp: (e) {
+              final dn = _lastTapDown;
+              if (dn != null && (e.position - dn).distance < 10) {
+                _onBodyTap(e.position);
+              }
+            },
+            onPointerDown: (e) => _lastTapDown = e.position,
+            child: ValueListenableBuilder<double>(
           valueListenable: appFont,
           builder: (_, fs, _) {
             final blocks = splitBlocks(_content!);
@@ -1195,10 +1326,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
               if (bi < blocks.length - 1) children.add(const SizedBox(height: 8));
             }
             return ListView(
+              controller: _mdScroll,
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               children: children,
             );
           },
+          ),
           ),
         ]);
     }
@@ -1219,7 +1352,41 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 }
 
-// ---------- 标注面板（搜索 / 跳转 / 删除） ----------
+// 波浪线画笔：对每条标注矩形在文字底部画蓝色波浪（引擎的 wavy 装饰不可用，故自绘）
+class _WavyPainter extends CustomPainter {
+  final ValueNotifier<List<(Mark, Rect)>> notifier;
+  _WavyPainter(this.notifier) : super(repaint: notifier);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round
+      ..isAntiAlias = true
+      ..color = ulBlue;
+    for (final (m, r) in notifier.value) {
+      if (m.isHighlight) continue; // 高亮不画线
+      final y = r.bottom - 2;
+      final path = Path()..moveTo(r.left, y);
+      const wave = 9.0, amp = 2.8;
+      var x = r.left;
+      var up = true;
+      while (x < r.right) {
+        final next = x + wave / 2;
+        path.quadraticBezierTo((x + next) / 2, up ? y - amp : y + amp, next, y);
+        x = next;
+        up = !up;
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WavyPainter old) => true;
+}
+
+// ---------- 标注面板（搜索 / 跳转 / 删除） ----------// ---------- 标注面板（搜索 / 跳转 / 删除） ----------
 
 class MarksPanel extends StatefulWidget {
   final List<Mark> marks;

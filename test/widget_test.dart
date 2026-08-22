@@ -8,16 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hmd/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-bool _hasWavy(InlineSpan span) {
-  if (span is TextSpan) {
-    final st = span.style;
-    if (st?.decoration == TextDecoration.underline && st?.background != null) {
-      return true; // 划线 = 淡蓝底 + 下划线
-    }
-    return span.children?.any(_hasWavy) ?? false;
-  }
-  return false;
-}
 
 bool _hasBg(InlineSpan span) {
   if (span is TextSpan) {
@@ -200,6 +190,23 @@ void main() {
     expect(selectedOf(null, const TextSelection(baseOffset: 0, extentOffset: 1)), '');
   });
 
+  testWidgets('阅读页：点击已标注文字弹出复制/删除菜单', (t) async {
+    final m = Mark('mk1', '世界', '你好，', '。', 1, true, false, 1);
+    await saveMarks('t点击.md', [m]);
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't点击.md', initialContent: '# 标\n\n你好，世界。OK',
+      ),
+    ));
+    await t.pumpAndSettle();
+    await t.pump(); // 触发 post-frame 矩形测量
+    await t.tapAt(t.getCenter(find.textContaining('世界').first));
+    await t.pumpAndSettle();
+    expect(find.text('复制'), findsOneWidget);
+    expect(find.text('删除标注'), findsOneWidget);
+  });
+
   testWidgets('阅读页：长按选词→浮条→点高亮→保存渲染消失（一段式）', (t) async {
     await t.pumpWidget(MaterialApp(
       theme: HmdApp.theme('light'),
@@ -228,7 +235,12 @@ void main() {
       ),
     ));
     await t.pumpAndSettle();
-    expect(find.byWidgetPredicate((w) => (w is SelectableText && w.textSpan != null ? _hasWavy(w.textSpan!) : (w is RichText && _hasWavy(w.text)))), findsOneWidget);
+    await t.pump(); // 触发 post-frame 测量
+    // 划线 span 现为排版中性的纯文本，波浪线由自绘层绘制（_WavyPainter 持矩形数据）
+    expect(
+        find.byWidgetPredicate(
+            (w) => w is CustomPaint && w.painter.runtimeType.toString() == '_WavyPainter'),
+        findsOneWidget);
   });
 
   testWidgets('阅读页：跨段旧锚点仍能渲染（退化匹配）', (t) async {
