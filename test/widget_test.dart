@@ -58,4 +58,10 @@ void main() {
   test('safeName 清理非法字符', () {
     expect(safeName('a/b\\c:d*e?f"g<h>i|.md'), 'a_b_c_d_e_f_g_h_i_.md');
   });
+
+  test('safeName 截断超长文件名并保留扩展名', () {
+    final r = safeName('${'超' * 200}.md');
+    expect(r.length, 80);
+    expect(r.endsWith('.md'), isTrue);
+  });
 }

@@ -97,7 +97,16 @@ Future<Directory> docsDir() async {
 
 // ponytail: 同名文件直接覆盖旧副本。同一名字视为同一篇文档，简单可靠；
 // 若将来要区分"同名不同内容"，升级路径是副本名加时间戳、RecentRec 存完整路径。
-String safeName(String n) => n.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+// 超长名截到 80 字符（中文 UTF-8 下仍低于 Android 255 字节文件名上限），保留扩展名。
+String safeName(String n) {
+  var s = n.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  if (s.length > 80) {
+    final dot = s.lastIndexOf('.');
+    final ext = dot > 0 && dot > s.length - 12 ? s.substring(dot) : '';
+    s = '${s.substring(0, 80 - ext.length)}$ext';
+  }
+  return s;
+}
 
 // ---------- 主页 ----------
 
