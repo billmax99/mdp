@@ -1,14 +1,16 @@
-// hmd —— 极简 Markdown 阅读器（iOS 风格 / 大按钮 / 左手操作）
-// 场景：微信里收到的 .md 文件打不开。本应用可通过系统"用其他应用打开"
-// 直接接收，或在应用内自行选择文件。文件会被复制到应用私有目录保存。
+// hmd —— 极简阅读器（iOS 风格 / 大按钮 / 左手操作）
+// 支持 md / txt / pdf / epub / docx；微信"用其他应用打开"可直接跳转。
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -108,6 +110,133 @@ String safeName(String n) {
   return s;
 }
 
+// ---------- 多格式支持 ----------
+
+enum DocKind { md, pdf, epub, docx }
+
+DocKind kindOf(String name) {
+  switch (name.toLowerCase().split('.').last) {
+    case 'pdf':
+      return DocKind.pdf;
+    case 'epub':
+      return DocKind.epub;
+    case 'docx':
+      return DocKind.docx;
+    default:
+      return DocKind.md; // md / markdown / mdown / txt
+  }
+}
+
+IconData iconFor(String name) {
+  switch (kindOf(name)) {
+    case DocKind.pdf:
+      return Icons.picture_as_pdf_outlined;
+    case DocKind.epub:
+      return Icons.menu_book_outlined;
+    case DocKind.docx:
+      return Icons.article_outlined;
+    case DocKind.md:
+      return Icons.description_outlined;
+  }
+}
+
+String _xmlUnescape(String s) => s
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&'); // amp 最后处理，避免双重转义还原错乱
+
+// ponytail: docx 只抽段落文本（丢格式/图片/表格结构），够"读"用；
+// 要保真排版需上 mammoth 类 HTML 转换，Dart 生态无成熟实现。
+Future<String> extractDocxText(String path) async {
+  final zip = ZipDecoder().decodeBytes(await File(path).readAsBytes());
+  final doc = zip.findFile('word/document.xml');
+  if (doc == null) return '';
+  final xml = utf8.decode(doc.content as List<int>);
+  final sb = StringBuffer();
+  for (final para in RegExp(r'<w:p[ >].*?</w:p>|<w:p/>', dotAll: true).allMatches(xml)) {
+    final line = RegExp(r'<w:t[^>]*>(.*?)</w:t>', dotAll: true)
+        .allMatches(para.group(0)!)
+        .map((m) => m.group(1)!)
+        .join();
+    if (line.isNotEmpty) sb.writeln(_xmlUnescape(line));
+  }
+  return sb.toString();
+}
+
+// ponytail: 自写 EPUB 解析（zip + container.xml + opf 的 manifest/spine），
+// 只取 spine 顺序的 xhtml 章节。不引 epubx 是因为它钉死 image 3.x，与 pdfrx 的
+// image 4.x 冲突。加密/DRM 的 epub 不支持；升级路径是接入 epubx 修复版或自写完整 OPF 解析。
+Future<List<String>> extractEpubHtml(String path) async {
+  final zip = ZipDecoder().decodeBytes(await File(path).readAsBytes());
+  final files = {for (final f in zip) f.name: f};
+
+  // container.xml → OPF 路径
+  var opfPath = '';
+  final container = files['META-INF/container.xml'];
+  if (container != null) {
+    final m = RegExp(r'full-path="([^"]+)"').firstMatch(utf8.decode(container.content as List<int>));
+    if (m != null) opfPath = m.group(1)!;
+  }
+  ArchiveFile? opf;
+  if (opfPath.isNotEmpty) opf = zip.findFile(opfPath);
+  if (opf == null) {
+    for (final f in zip) {
+      if (f.name.endsWith('.opf')) {
+        opf = f;
+        break;
+      }
+    }
+  }
+  if (opf == null) return const [];
+
+  final xml = utf8.decode(opf.content as List<int>);
+  final base = opf.name.contains('/') ? opf.name.substring(0, opf.name.lastIndexOf('/') + 1) : '';
+
+  // manifest: id → href（逐属性抽取，不依赖属性顺序）
+  final manifest = <String, String>{};
+  for (final m in RegExp(r'<item\b[^>]*>').allMatches(xml)) {
+    final tag = m.group(0)!;
+    final id = RegExp(r'\bid="([^"]*)"').firstMatch(tag)?.group(1);
+    final href = RegExp(r'\bhref="([^"]*)"').firstMatch(tag)?.group(1);
+    if (id != null && href != null) manifest[id] = href;
+  }
+  final order = <String>[
+    for (final m in RegExp(r'<itemref\b[^>]*>').allMatches(xml))
+      if (RegExp(r'\bidref="([^"]*)"').firstMatch(m.group(0)!)?.group(1) case final idref?)
+        ?manifest[idref]
+  ];
+
+  String? resolve(String href) {
+    final p = base + href;
+    if (files.containsKey(p)) return p;
+    for (final k in files.keys) {
+      if (k == href || k.endsWith('/$href')) return k;
+    }
+    return null;
+  }
+
+  final out = <String>[];
+  if (order.isEmpty) {
+    // 兜底：无 spine 时按文件名序输出全部 html
+    for (final k in files.keys.toList()..sort()) {
+      if (k.endsWith('.xhtml') || k.endsWith('.html')) {
+        final c = utf8.decode(files[k]!.content as List<int>);
+        if (c.trim().isNotEmpty) out.add(c);
+      }
+    }
+    return out;
+  }
+  for (final href in order) {
+    final f = resolve(href);
+    if (f == null) continue;
+    final c = utf8.decode(files[f]!.content as List<int>);
+    if (c.trim().isNotEmpty) out.add(c);
+  }
+  return out;
+}
+
 // ---------- 主页 ----------
 
 class HomeScreen extends StatefulWidget {
@@ -149,7 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _pick() async {
     final f = await FilePicker.pickFile(
       type: FileType.custom,
-      allowedExtensions: ['md', 'markdown', 'txt', 'mdown'],
+      allowedExtensions: ['md', 'markdown', 'mdown', 'txt', 'pdf', 'epub', 'docx'],
     );
     final p = f?.path;
     if (p != null && p.isNotEmpty) await _ingestFile(p);
@@ -270,7 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           color: card,
           child: Row(children: [
-            const Icon(Icons.description_outlined, size: 28, color: iosBlue),
+            Icon(iconFor(r.name), size: 28, color: iosBlue),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -315,8 +444,11 @@ class ReaderScreen extends StatefulWidget {
 }
 
 class _ReaderScreenState extends State<ReaderScreen> {
-  String? _content;
+  String? _content; // md / docx 正文
+  List<String>? _html; // epub 章节列表
   String? _error;
+
+  DocKind get _kind => kindOf(widget.title);
 
   @override
   void initState() {
@@ -324,26 +456,39 @@ class _ReaderScreenState extends State<ReaderScreen> {
     if (widget.initialContent != null) {
       _content = widget.initialContent;
     } else {
-      _read();
+      _load();
     }
   }
 
-  Future<void> _read() async {
+  Future<void> _load() async {
     final f = File(widget.path);
     try {
-      final t = await f.readAsString();
-      if (mounted) setState(() => _content = t);
+      switch (_kind) {
+        case DocKind.md:
+          _content = await f.readAsString();
+        case DocKind.docx:
+          _content = await extractDocxText(widget.path);
+          if (_content!.isEmpty) _error = '未能从文档中提取到文本';
+        case DocKind.epub:
+          _html = await extractEpubHtml(widget.path);
+          if (_html!.isEmpty) _error = '未能解析此 EPUB 文件';
+        case DocKind.pdf:
+          break; // PdfViewer 自行加载
+      }
     } on FileSystemException {
-      if (mounted) setState(() => _error = '文件不存在或无法读取');
+      _error = '文件不存在或无法读取';
     } on FormatException {
       // ponytail: 非 UTF-8 编码用 Latin-1 兜底（中文文档几乎都是 UTF-8，走不到这）
       try {
-        final t = await f.readAsString(encoding: latin1);
-        if (mounted) setState(() => _content = t);
+        _content = await f.readAsString(encoding: latin1);
       } catch (_) {
-        if (mounted) setState(() => _error = '文件编码无法识别');
+        _error = '文件编码无法识别';
       }
+    } catch (_) {
+      // zip 结构损坏、epub schema 异常等一切解析失败：给出可读提示而非崩溃
+      _error = '打开失败：文件可能已损坏或格式不受支持';
     }
+    if (mounted) setState(() {});
   }
 
   void _setFont(double v) {
@@ -367,26 +512,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: _error != null
-          ? Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.error_outline_rounded, size: 46, color: iosGray),
-                const SizedBox(height: 12),
-                Text(_error!, style: const TextStyle(fontSize: 16, color: iosGray)),
-              ]),
-            )
-          : _content == null
-              ? const Center(child: CircularProgressIndicator(color: iosBlue))
-              : ValueListenableBuilder<double>(
-                  valueListenable: appFont,
-                  builder: (_, fs, _) => Markdown(
-                    data: _content!,
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                    styleSheet: _mdStyle(context, fs),
-                  ),
-                ),
-      // 左手工具条：按钮集中左侧，右手拇指区域留给滚动
-      bottomNavigationBar: SafeArea(
+      body: _buildBody(),
+      // 左手工具条：按钮集中左侧，右手拇指区域留给滚动。
+      // pdf 无工具条——pdfrx 自带捏合缩放与翻页，字号/主题对固定版式无意义。
+      bottomNavigationBar: _kind == DocKind.pdf ? null : SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
           child: ValueListenableBuilder<double>(
@@ -428,6 +557,48 @@ class _ReaderScreenState extends State<ReaderScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildBody() {
+    final err = Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.error_outline_rounded, size: 46, color: iosGray),
+        const SizedBox(height: 12),
+        Text(_error ?? '', style: const TextStyle(fontSize: 16, color: iosGray)),
+      ]),
+    );
+    final loading = const Center(child: CircularProgressIndicator(color: iosBlue));
+    if (_error != null) return err;
+    switch (_kind) {
+      case DocKind.pdf:
+        return PdfViewer.file(widget.path);
+      case DocKind.epub:
+        if (_html == null) return loading;
+        return ValueListenableBuilder<double>(
+          valueListenable: appFont,
+          builder: (_, fs, _) => ListView.builder(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            itemCount: _html!.length,
+            itemBuilder: (_, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: HtmlWidget(
+                _html![i],
+                textStyle: TextStyle(fontSize: fs, height: 1.7),
+              ),
+            ),
+          ),
+        );
+      default: // md / docx
+        if (_content == null) return loading;
+        return ValueListenableBuilder<double>(
+          valueListenable: appFont,
+          builder: (_, fs, _) => Markdown(
+            data: _content!,
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            styleSheet: _mdStyle(context, fs),
+          ),
+        );
+    }
   }
 
   static MarkdownStyleSheet _mdStyle(BuildContext c, double fs) {
