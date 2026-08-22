@@ -46,3 +46,5 @@ app.*.map.json
 backup/
 android/build/
 windows/flutter/ephemeral/
+emu_log.txt
+temp/
