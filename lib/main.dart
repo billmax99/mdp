@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
+import 'package:hmd/build_info.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -84,7 +85,7 @@ class HmdApp extends StatelessWidget {
     return ValueListenableBuilder<String>(
       valueListenable: appTheme,
       builder: (_, key, _) => MaterialApp(
-        title: 'MD阅读器',
+        title: 'MD+',
         theme: theme('light'),
         darkTheme: theme(key == 'light' ? 'dark' : key),
         themeMode: key == 'light' ? ThemeMode.light : ThemeMode.dark,
@@ -504,7 +505,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 32),
           children: [
-            const Text('MD 阅读器',
+            const Text('MD+',
                 style: TextStyle(fontSize: 34, fontWeight: FontWeight.w700, height: 1.25)),
             const SizedBox(height: 4),
             const Text('微信里收到的 Markdown，也能舒服地看',
@@ -559,6 +560,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ],
+            const SizedBox(height: 18),
+            Text(
+              'MD+ v$appVersion · 构建 $buildDate',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: iosGray),
+            ),
           ],
         ),
       ),

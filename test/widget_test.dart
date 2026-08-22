@@ -45,7 +45,7 @@ void main() {
   testWidgets('主页：标题与大按钮存在，无 recent 时空状态可见', (t) async {
     await t.pumpWidget(const HmdApp());
     await t.pumpAndSettle();
-    expect(find.text('MD 阅读器'), findsOneWidget);
+    expect(find.text('MD+'), findsOneWidget);
     expect(find.text('打开 .md 文件'), findsOneWidget);
     expect(find.text('还没有文档'), findsOneWidget);
   });
