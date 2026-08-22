@@ -190,8 +190,9 @@ class Mark {
   const Mark(this.id, this.text, this.before, this.after, this.createdAt, this.isHighlight, this.isPdf, this.page);
   Map<String, dynamic> toJson() => {'i': id, 't': text, 'b': before, 'a': after, 'c': createdAt, 'h': isHighlight, 'p': isPdf, 'n': page};
   static Mark? fromJson(dynamic j) => j is Map && j['i'] is String && j['t'] is String
-      ? Mark(j['i'], j['t'], j['b'] ?? '', j['a'] ?? '', (j['c'] as num?)?.toInt() ?? 0,
-          j['h'] == true, j['p'] == true, (j['n'] as num?)?.toInt() ?? 0)
+      ? Mark(j['i'], j['t'], j['b'] is String ? j['b'] : '', j['a'] is String ? j['a'] : '',
+          (j['c'] as num?)?.toInt() ?? 0, j['h'] == true, j['p'] == true,
+          (j['n'] as num?)?.toInt() ?? 0)
       : null;
 }
 
@@ -208,14 +209,6 @@ List<Mark> loadMarks(String doc) => (prefs.getStringList('marks_$doc') ?? const 
 
 Future<void> saveMarks(String doc, List<Mark> l) =>
     prefs.setStringList('marks_$doc', l.map((m) => jsonEncode(m.toJson())).toList());
-
-// 以"前文+选中文字"为锚点定位；找不到（文档已改/文本跨标签）则放弃该标注的回显。
-// ponytail: 选中文本在全文多次出现时取第一次（SelectionArea 拿不到选区位置）；
-// 升级路径：解析 SelectableRegion 的 per-Selectable TextPosition。
-int anchorOf(String fullText, Mark m) {
-  final i = fullText.indexOf(m.before + m.text);
-  return i < 0 ? -1 : i + m.before.length;
-}
 
 // 按空行切块（段落级），fence（``` / ~~~）内的空行不切断，保护代码块完整性
 List<String> splitBlocks(String s) {
@@ -491,8 +484,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ..insert(0, rec);
     if (_recent.length > 50) _recent.removeLast();
     await saveRecent(_recent);
-    if (mounted) setState(() {});
     if (!mounted) return;
+    setState(() {});
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ReaderScreen(path: p, title: rec.name),
     ));
@@ -516,7 +509,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const Text('MD+',
                 style: TextStyle(fontSize: 34, fontWeight: FontWeight.w700, height: 1.25)),
             const SizedBox(height: 4),
-            const Text('微信里收到的 Markdown，也能舒服地看',
+            const Text('微信里收到的文档，都能舒服地看',
                 style: TextStyle(fontSize: 14, color: iosGray)),
             const SizedBox(height: 22),
             SizedBox(
@@ -645,7 +638,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
   PdfTextSearcher? _pdfSearcher;
   bool _pdfSel = false; // pdf 当前有选中文本
   String _mdSelText = ''; // md 当前选中文字（onSelectionChanged 记录，不依赖剪贴板）
-  // md 默认不可选择（保证滚动流畅）；长按正文进入选择模式，标注完成或点完成后退出
 
   bool _searchOpen = false;
   final _searchCtrl = TextEditingController();
@@ -658,7 +650,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void initState() {
     super.initState();
     _marks = loadMarks(widget.title);
-    debugPrint('hmd mark: loaded ${_marks.length} marks for ${widget.title}');
     if (widget.initialContent != null) {
       _content = widget.initialContent;
     } else {
@@ -711,6 +702,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   void _toast(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), duration: const Duration(milliseconds: 1500)));
   }
@@ -744,7 +736,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
     final m = Mark(DateTime.now().microsecondsSinceEpoch.toString(), text, b, a,
         DateTime.now().millisecondsSinceEpoch, hl, false, page);
-    debugPrint('hmd mark: saved id=${m.id} page=$page marks=${_marks.length + 1}');
     setState(() => _marks = [..._marks, m]);
     await saveMarks(widget.title, _marks);
     _toast(hl ? '已高亮' : '已划线');
@@ -834,7 +825,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  // ---- 全文搜索 ----  // ---- 全文搜索 ----  // ---- 全文搜索 ----
+  // ---- 全文搜索 ----
 
   int get _searchTotal => _kind == DocKind.epub ? _searchHitChapters.length : _searchHitBlocks.length;
 
@@ -921,6 +912,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_searchOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _searchOpen) _closeSearch();
+      },
+      child: _buildScaffold(),
+    );
+  }
+
+  void _closeSearch() {
+    _searchCtrl.clear();
+    _pdfSearcher?.startTextSearch('');
+    setState(() {
+      _searchOpen = false;
+      _query = '';
+    });
+  }
+
+  Widget _buildScaffold() {
     final card = themes[appTheme.value]?.$2 ?? (Theme.of(context).brightness == Brightness.dark ? darkCard : Colors.white);
     return Scaffold(
       appBar: _searchOpen ? _searchAppBar() : AppBar(
@@ -1035,13 +1045,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         IconButton(
           icon: const Icon(Icons.close, size: 22),
           tooltip: '关闭搜索',
-          onPressed: () {
-            _searchCtrl.clear();
-            setState(() {
-              _searchOpen = false;
-              _query = '';
-            });
-          },
+          onPressed: _closeSearch,
         ),
       ],
     );
