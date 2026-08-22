@@ -201,27 +201,32 @@ void main() {
     expect(selectedOf(null, const TextSelection(baseOffset: 0, extentOffset: 1)), '');
   });
 
-  testWidgets('阅读页：长按进入选择模式显示浮条，点完成退出', (t) async {
+  testWidgets('阅读页：长按进模式选词后浮条出现在上方，点高亮保存并渲染', (t) async {
     await t.pumpWidget(MaterialApp(
       theme: HmdApp.theme('light'),
       home: const ReaderScreen(
-        path: 't.md', title: 't模式.md', initialContent: '# 标\n\n你好世界正文OK',
+        path: 't.md', title: 't浮条.md', initialContent: '# 标\n\n你好世界正文OK',
       ),
     ));
     await t.pumpAndSettle();
-    expect(find.text('完成'), findsNothing); // 无浮条
-    final g = await t.startGesture(const Offset(540, 500));
+    expect(find.text('划线'), findsNothing);
+    // 第一步：长按空白进入选择模式（无提示无浮条）
+    final g0 = await t.startGesture(const Offset(300, 400));
+    await t.pump(const Duration(milliseconds: 600));
+    await g0.up();
+    await t.pumpAndSettle();
+    expect(ScaffoldMessenger.of(t.element(find.byType(Scaffold))).mounted, isTrue);
+    // 第二步：长按文字选词
+        final g = await t.startGesture(t.getCenter(find.text('你好世界正文OK').first));
     await t.pump(const Duration(milliseconds: 600));
     await g.up();
     await t.pumpAndSettle();
     expect(find.text('划线'), findsOneWidget);
     expect(find.text('高亮'), findsOneWidget);
-    expect(find.text('完成'), findsOneWidget);
-    await t.pump(const Duration(milliseconds: 4300)); // 等 SnackBar 消失
+    await t.tap(find.text('高亮').first, warnIfMissed: false);
     await t.pumpAndSettle();
-    await t.tap(find.text('完成'));
-    await t.pumpAndSettle();
-    expect(find.text('完成'), findsNothing);
+    expect(find.text('高亮'), findsNothing); // 浮条消失
+    expect(prefs.getStringList('marks_t浮条.md'), isNotEmpty);
   });
 
   testWidgets('阅读页：预置划线渲染为波浪线（TextSpan 层）', (t) async {

@@ -7,7 +7,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:hmd/build_info.dart';
 import 'package:markdown/markdown.dart' as md;
@@ -647,6 +647,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _selectMode = false;
   Timer? _lpTimer;
   Offset? _lpPos;
+  Offset? _menuAnchor; // 长按触发点，浮条在其上方显示
+  final _scrollCtrl = ScrollController();
+  double _lastScrollPixels = 0;
   bool _searchOpen = false;
   final _searchCtrl = TextEditingController();
   String _query = '';
@@ -659,6 +662,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
     super.initState();
     _marks = loadMarks(widget.title);
     debugPrint('hmd mark: loaded ${_marks.length} marks for ${widget.title}');
+    _scrollCtrl.addListener(() {
+      if (!_scrollCtrl.hasClients) return;
+      final p = _scrollCtrl.position.pixels;
+      if ((p - _lastScrollPixels).abs() > 2 && (_selectMode || _mdSelText.isNotEmpty)) {
+        setState(() {
+          _selectMode = false;
+          _mdSelText = '';
+        });
+      }
+      _lastScrollPixels = p;
+    });
     if (widget.initialContent != null) {
       _content = widget.initialContent;
     } else {
@@ -669,6 +683,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _scrollCtrl.dispose();
+    _lpTimer?.cancel();
     _pdfSearcher?.dispose();
     super.dispose();
   }
@@ -1023,6 +1039,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     if (_error != null) return err;
     switch (_kind) {
       case DocKind.pdf:
+        final darkPdf = Theme.of(context).brightness == Brightness.dark;
         return Stack(children: [
           PdfViewer.file(
             widget.path,
@@ -1035,6 +1052,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
               ),
             ),
           ),
+          // 深色模式下压暗白纸页面，夜间阅读不刺眼
+          if (darkPdf)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(color: Colors.black.withValues(alpha: 0.28)),
+              ),
+            ),
           if (_pdfSel)
             Positioned(
               left: 20,
@@ -1092,8 +1116,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
             if (!_selectMode) {
               _lpTimer = Timer(const Duration(milliseconds: 520), () {
                 if (_lpPos != null && mounted) {
-                  setState(() => _selectMode = true);
-                  _toast('选择模式：选中文字后点划线/高亮');
+                  setState(() {
+                    _selectMode = true;
+                    _menuAnchor = _lpPos;
+                  });
                 }
               });
             }
@@ -1151,7 +1177,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 ]);
               }
               // MarkdownBody 无内部滚动视图；用滚动版 Markdown 会与外层 ListView 抢手势导致无法滚动
+              // key 强制重建：plus 包在 selectable 切换后不复位选择手势，需全新子树
               final w = MarkdownBody(
+                key: ValueKey('md-$_selectMode'),
                 data: data,
                 styleSheet: _mdStyle(context, fs),
                 inlineSyntaxes: [MarkSyntax()],
@@ -1162,56 +1190,48 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 },
                 selectable: _selectMode,
                 onSelectionChanged: _onMdSelection,
+                contextMenuBuilder: (_, _) => const SizedBox.shrink(),
               );
               children.add(blockKey == null ? w : KeyedSubtree(key: blockKey, child: w));
               if (bi < blocks.length - 1) children.add(const SizedBox(height: 8));
             }
             return ListView(
+              controller: _scrollCtrl,
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               children: children,
             );
           },
           ),
-          if (_selectMode)
+          // 有选择时在长按点上方弹出"划线/高亮"；滚动或取消选择即自动消失
+          if (_mdSelText.isNotEmpty && _menuAnchor != null)
             Positioned(
-              left: 20,
-              bottom: 24,
+              left: (_menuAnchor!.dx - 70).clamp(8.0, MediaQuery.of(context).size.width - 160),
+              top: (_menuAnchor!.dy - 72).clamp(88.0, double.infinity),
               child: Container(
                 decoration: BoxDecoration(
                     color: iosBlue, borderRadius: BorderRadius.circular(24)),
                 child: Row(children: [
                   TextButton(
-                    onPressed: _mdSelText.isEmpty
-                        ? null
-                        : () {
-                            final t = _mdSelText;
-                            setState(() {
-                              _mdSelText = '';
-                              _selectMode = false;
-                            });
-                            _addMark(t, false);
-                          },
+                    onPressed: () {
+                      final t = _mdSelText;
+                      setState(() {
+                        _mdSelText = '';
+                        _selectMode = false;
+                      });
+                      _addMark(t, false);
+                    },
                     child: const Text('划线', style: TextStyle(color: Colors.white, fontSize: 16)),
                   ),
                   TextButton(
-                    onPressed: _mdSelText.isEmpty
-                        ? null
-                        : () {
-                            final t = _mdSelText;
-                            setState(() {
-                              _mdSelText = '';
-                              _selectMode = false;
-                            });
-                            _addMark(t, true);
-                          },
+                    onPressed: () {
+                      final t = _mdSelText;
+                      setState(() {
+                        _mdSelText = '';
+                        _selectMode = false;
+                      });
+                      _addMark(t, true);
+                    },
                     child: const Text('高亮', style: TextStyle(color: Colors.white, fontSize: 16)),
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _selectMode = false;
-                      _mdSelText = '';
-                    }),
-                    child: const Text('完成', style: TextStyle(color: Colors.white, fontSize: 16)),
                   ),
                 ]),
               ),
