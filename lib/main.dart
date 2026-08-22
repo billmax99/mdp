@@ -199,7 +199,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final card = dark ? darkCard : Colors.white;
     return Scaffold(
       body: SafeArea(
-        bottom: false,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 32),
           children: [
