@@ -640,6 +640,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _measureScheduled = false;
   Offset? _lastTapDown;
   (Mark, Rect)? _tapMenuMark; // 点击标注弹出的工具条（mark + 锚矩形）
+  Rect? _selAnchor; // 当前选区的锚矩形（选词工具条定位）
+  int _mdEpoch = 0; // 递增以强制重建 MarkdownBody，从而清除系统选区
   final _stackKey = GlobalKey(); // body Stack：矩形局部坐标系的基准
   Offset _stackOrigin = Offset.zero;
 
@@ -792,7 +794,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _measureScheduled = false;
       if (!mounted || _kind == DocKind.pdf) return;
+      final oldAnchor = _selAnchor;
       final out = <(Mark, Rect)>[];
+      _selAnchor = null; // 每次重测重定位选区锚点（循环外重置一次）
       for (final bi in _blockKeys.keys.toList()..sort()) {
         final ctx = _blockKeys[bi]?.currentContext;
         if (ctx == null) continue;
@@ -816,11 +820,26 @@ class _ReaderScreenState extends State<ReaderScreen> {
         }
         if (runs.isEmpty) continue;
 
+        _selAnchor = null; // 每次重测重定位选区锚点
         // 直接在每个渲染对象自身的文本里锚定匹配，取其选择盒（不做全局偏移换算，
         // run 自己的文本与盒子天然同坐标系，杜绝错位）
         for (final r in runs.map((e) => e.$3)) {
           final runText = (r.text as InlineSpan).toPlainText();
           if (runText.isEmpty) continue;
+          // 选区锚点：当前选中词在本 run 的顶矩形（选词工具条定位）
+          if (_mdSelText.isNotEmpty && _selAnchor == null) {
+            final si = runText.indexOf(_mdSelText);
+            if (si >= 0) {
+              final sbx = (r.getBoxesForSelection as dynamic)(
+                  TextSelection(baseOffset: si, extentOffset: si + _mdSelText.length)) as List;
+              if (sbx.isNotEmpty) {
+                final b0 = sbx.first;
+                final org = (r.localToGlobal as dynamic)(Offset.zero) as Offset;
+                _selAnchor = Rect.fromLTWH(org.dx + b0.left, org.dy + b0.top,
+                    b0.right - b0.left, b0.bottom - b0.top);
+              }
+            }
+          }
           for (final m in _marks.where((m) => !m.isPdf && m.page == bi)) {
             var i = m.before.isEmpty ? -1 : runText.indexOf(m.before + m.text);
             i = i >= 0 ? i + m.before.length : runText.indexOf(m.text);
@@ -842,6 +861,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _stackOrigin = so;
       final local = [for (final (m, r) in out) (m, r.shift(-so))];
       if (mounted && !_sameRects(_rectNotifier.value, local)) _rectNotifier.value = local;
+      if (mounted && _selAnchor != oldAnchor) setState(() {}); // 工具条出现/收起
     });
   }
 
@@ -851,6 +871,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
       if (a[i].$1.id != b[i].$1.id || a[i].$2 != b[i].$2) return false;
     }
     return true;
+  }
+
+  // 选词菜单动作：标注 + 清选区（重建 MarkdownBody）+ 收工具条
+  void _markFromSelection(bool hl) {
+    final t = _mdSelText;
+    setState(() {
+      _mdSelText = '';
+      _selAnchor = null;
+      _mdEpoch++; // 重建清空系统选区
+    });
+    _addMark(t, hl);
   }
 
   // 点击已标注文字：弹与选词菜单同款的工具条（复制/删除）
@@ -877,16 +908,20 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void _onMdSelection(String? text, TextSelection selection, SelectionChangedCause? cause) {
     final t = selectedOf(text, selection);
     if (t == _mdSelText) return;
-    if (mounted) setState(() => _mdSelText = t);
+    if (mounted) {
+      setState(() {
+        _mdSelText = t;
+        if (t.isEmpty) _selAnchor = null;
+      });
+    }
   }
 
   // 统一大工具条：选词菜单与点击标注菜单共用同一容器样式
   Widget markToolbar(List<(String, VoidCallback)> items) => Container(
-        height: 58,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.all(8), // 不设固定高，由内容自然撑起，杜绝文字被裁
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(29),
+          borderRadius: BorderRadius.circular(14),
           boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 12, offset: Offset(0, 3))],
         ),
         child: Row(
@@ -894,45 +929,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
           children: [
             for (final (i, item) in items.indexed)
               Padding(
-                padding: EdgeInsets.only(left: i == 0 ? 0 : 6),
-                child: TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.black87,
-                    backgroundColor: const Color(0xFFF2F2F7),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-                    textStyle: const TextStyle(fontSize: 16),
-                    padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 12),
+                padding: EdgeInsets.only(left: i == 0 ? 0 : 8),
+                // 自绘按钮：无框架内建约束，文字渲染稳定不被裁（InkWell/Material 在菜单容器中实测塌陷为 0 高）
+                child: GestureDetector(
+                  onTap: item.$2,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF2F2F7),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(item.$1,
+                        style: const TextStyle(fontSize: 16, color: Colors.black87)),
                   ),
-                  onPressed: item.$2,
-                  child: Text(item.$1),
                 ),
               ),
           ],
         ),
       );
-
-  // 选词菜单（划线/高亮）：框架托管定位与层级
-  Widget _markMenu(BuildContext menuContext, EditableTextState editor) {
-    void mark(bool hl) {
-      final t = _mdSelText;
-      final c = editor.widget.controller;
-      c.value = c.value.copyWith(
-          selection: TextSelection.collapsed(offset: c.selection.baseOffset));
-      editor.hideToolbar();
-      setState(() => _mdSelText = '');
-      _addMark(t, hl);
-    }
-
-    return AdaptiveTextSelectionToolbar(
-      anchors: editor.contextMenuAnchors,
-      children: [
-        markToolbar([
-          ('划线', () => mark(false)),
-          ('高亮', () => mark(true)),
-        ]),
-      ],
-    );
-  }
 
   // ---- 全文搜索 ----
 
@@ -1264,21 +1278,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
             _searchHitBlocks.clear();
             final children = <Widget>[];
             for (final (bi, raw) in blocks.indexed) {
-              // 标注不再注入正文（视觉由矩形层绘制，定位零冲突）；仅搜索命中注入橙色 token
+              // 标注不再注入正文（视觉由矩形层绘制，定位零冲突）；仅搜索命中注入橙色 token。
+              // 所有块统一挂 key：矩形测量与选区锚点需要遍历任意块
               final hits = findMatches(raw, _query);
               var data = raw;
-              GlobalKey? blockKey;
               for (final (s, e) in hits.reversed) {
                 data = data.replaceRange(s, e, '⟦s⟧${data.substring(s, e)}⟦/s⟧');
-                blockKey ??= _blockKeys[bi] ??= GlobalKey();
               }
-              if (blockKey != null) {
-                _searchHitBlocks.addAll([for (var j = 0; j < hits.length; j++) bi]);
-              }
-              // 标注所在块也要有 key（供矩形测量与跳转定位）
-              if (_marks.any((m) => !m.isPdf && m.page == bi)) {
-                _blockKeys[bi] ??= GlobalKey();
-              }
+              _searchHitBlocks.addAll([for (var j = 0; j < hits.length; j++) bi]);
+              _blockKeys[bi] ??= GlobalKey();
               // MarkdownBody 无内部滚动视图；用滚动版 Markdown 会与外层 ListView 抢手势导致无法滚动
               final w = MarkdownBody(
                 data: data,
@@ -1291,8 +1299,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 },
                 selectable: true,
                 onSelectionChanged: _onMdSelection,
-                contextMenuBuilder: (context, editor) =>
-                    _mdSelText.isEmpty ? const SizedBox.shrink() : _markMenu(context, editor),
+                key: ValueKey('md-$_mdEpoch'),
+                contextMenuBuilder: (_, _) => const SizedBox.shrink(),
               );
               final bk = _blockKeys[bi];
               children.add(bk == null ? w : KeyedSubtree(key: bk, child: w));
@@ -1306,6 +1314,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
           },
           ),
           ),
+          // 选词工具条（划线/高亮）：出现在选中词上方，与点击菜单同款组件
+          if (_mdSelText.isNotEmpty && _selAnchor != null)
+            Positioned(
+              left: (_selAnchor!.left - 40)
+                  .clamp(8.0, MediaQuery.of(context).size.width - 250),
+              top: (_selAnchor!.top - 76).clamp(96.0, double.infinity),
+              child: markToolbar([
+                ('划线', () => _markFromSelection(false)),
+                ('高亮', () => _markFromSelection(true)),
+              ]),
+            ),
           // 点击标注弹出的工具条（与选词菜单同款），点其他处关闭
           if (_tapMenuMark != null)
             Positioned(
