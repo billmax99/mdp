@@ -254,16 +254,9 @@ class MarkBuilder extends MarkdownElementBuilder {
   Widget? visitElementAfterWithContext(BuildContext context, md.Element element,
       TextStyle? preferredStyle, TextStyle? parentStyle) {
     final base = parentStyle ?? preferredStyle ?? TextStyle(fontSize: appFont.value, height: 1.7);
-    final TextStyle st;
-    if (kind == 'u') {
-      // 划线 span 不带任何视觉样式（排版中性）；波浪线由顶层自绘层按实测矩形绘制，
-      // 点击删除/复制也基于同一套矩形命中（引擎的 wavy 装饰实测不渲染，不可用）
-      st = base;
-    } else {
-      st = base.copyWith(
-          background: Paint()
-            ..color = (kind == 'h' ? hlYellow : searchOrange).withValues(alpha: 0.85));
-    }
+    // 仅搜索命中使用 span 样式（暂态）；标注（划线/高亮）视觉一律由矩形绘制层负责
+    final st = base.copyWith(
+        background: Paint()..color = (kind == 'h' ? hlYellow : searchOrange).withValues(alpha: 0.85));
     return RichText(text: TextSpan(text: element.textContent, style: st));
   }
 }
@@ -646,6 +639,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _mdScroll = ScrollController();
   bool _measureScheduled = false;
   Offset? _lastTapDown;
+  (Mark, Rect)? _tapMenuMark; // 点击标注弹出的工具条（mark + 锚矩形）
+  final _stackKey = GlobalKey(); // body Stack：矩形局部坐标系的基准
+  Offset _stackOrigin = Offset.zero;
 
   DocKind get _kind => kindOf(widget.title);
 
@@ -787,33 +783,65 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  // post-frame 实测每条标注文字的屏幕矩形：遍历各块 SelectableText 内的 RenderEditable，
-  // 在 span 树中找带背景（高亮）或纯文本边界（划线标记 span 无样式，用块内标注文本匹配），
-  // 得到矩形后既供自绘波浪层使用，也作为"点击已标注弹菜单"的命中区域。
+  // ---- 标注矩形系统：定位/绘制/点击命中全部基于同一套实测矩形 ----
+  // 正文不注入任何标注样式（排版恒定）；渲染后测量每条标注文字的精确屏幕矩形：
+  // 高亮=矩形画色块、划线=矩形画波浪，同文字多标注自然叠加互不冲突。
   void _scheduleMeasure() {
     if (_measureScheduled || !mounted) return;
     _measureScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _measureScheduled = false;
-      if (!mounted) return;
+      if (!mounted || _kind == DocKind.pdf) return;
       final out = <(Mark, Rect)>[];
-      for (final key in _blockKeys.values) {
-        final ctx = key.currentContext;
+      for (final bi in _blockKeys.keys.toList()..sort()) {
+        final ctx = _blockKeys[bi]?.currentContext;
         if (ctx == null) continue;
-        // plus 包的 selectable 底层可能是 RenderEditable 或 RenderParagraph，两者都收
-        final res = <dynamic>[];
-        void visit(RenderObject ro) {
-          if (ro is RenderEditable || ro is RenderParagraph) res.add(ro);
-          ro.visitChildren(visit);
-        }
+        // 有序收集块内全部文本渲染对象（visit 顺序即视觉顺序），渲染文本 == 原块文本
+        final runs = <(int, int, dynamic)>[]; // (0, 文本长度, RenderObject)
         final ro = ctx.findRenderObject();
-        if (ro is RenderEditable || ro is RenderParagraph) res.add(ro);
-        ro?.visitChildren(visit);
-        for (final re in res) {
-          _collectMarkRects(re, out);
+        final raw = <dynamic>[];
+        void collect(RenderObject r) {
+          if (r is RenderEditable || r is RenderParagraph) {
+            raw.add(r);
+          }
+          r.visitChildren(collect);
+        }
+        if (ro is RenderEditable || ro is RenderParagraph) raw.add(ro);
+        ro?.visitChildren(collect);
+        var acc = 0;
+        for (final r in raw) {
+          final len = (r.text as InlineSpan).toPlainText().length;
+          runs.add((acc, acc + len, r));
+          acc += len;
+        }
+        if (runs.isEmpty) continue;
+
+        // 直接在每个渲染对象自身的文本里锚定匹配，取其选择盒（不做全局偏移换算，
+        // run 自己的文本与盒子天然同坐标系，杜绝错位）
+        for (final r in runs.map((e) => e.$3)) {
+          final runText = (r.text as InlineSpan).toPlainText();
+          if (runText.isEmpty) continue;
+          for (final m in _marks.where((m) => !m.isPdf && m.page == bi)) {
+            var i = m.before.isEmpty ? -1 : runText.indexOf(m.before + m.text);
+            i = i >= 0 ? i + m.before.length : runText.indexOf(m.text);
+            if (i < 0) continue;
+            final boxes = (r.getBoxesForSelection as dynamic)(
+                TextSelection(baseOffset: i, extentOffset: i + m.text.length)) as List;
+            final origin = (r.localToGlobal as dynamic)(Offset.zero) as Offset;
+            for (final b in boxes) {
+              out.add((m,
+                  Rect.fromLTWH(origin.dx + b.left, origin.dy + b.top, b.right - b.left, b.bottom - b.top)));
+            }
+          }
         }
       }
-      if (mounted && !_sameRects(_rectNotifier.value, out)) _rectNotifier.value = out;
+      // 全局坐标转 body Stack 局部（绘制/命中/菜单定位统一同一坐标系）
+      final so = _stackKey.currentContext?.findRenderObject() is RenderBox
+          ? ((_stackKey.currentContext!.findRenderObject() as RenderBox).localToGlobal(Offset.zero))
+          : Offset.zero;
+      _stackOrigin = so;
+      final local = [for (final (m, r) in out) (m, r.shift(-so))];
+      if (mounted && !_sameRects(_rectNotifier.value, local)) _rectNotifier.value = local;
     });
   }
 
@@ -825,78 +853,23 @@ class _ReaderScreenState extends State<ReaderScreen> {
     return true;
   }
 
-  void _collectMarkRects(dynamic re, List<(Mark, Rect)> out) {
-    // 遍历 span 树，累计文字偏移，匹配标注文本片段
-    final pending = <(int, String)>[]; // (起始偏移, 文本)
-    int spanLength(InlineSpan sp) {
-      if (sp is TextSpan) {
-        var n = (sp.text ?? '').length;
-        for (final c in sp.children ?? const <InlineSpan>[]) {
-          n += spanLength(c);
-        }
-        return n;
-      }
-      return 0;
+  // 点击已标注文字：弹与选词菜单同款的工具条（复制/删除）
+  Mark? _hitMark(Offset pos) {
+    for (final (m, r) in _rectNotifier.value) {
+      if (r.inflate(10).contains(pos)) return m;
     }
-    void walk(InlineSpan sp, int offset) {
-      if (sp is TextSpan) {
-        final txt = sp.text ?? '';
-        if (txt.isNotEmpty) pending.add((offset, txt)); // 高亮/划线 span 都要：定位与命中均需要
-        var off = offset + txt.length;
-        for (final c in sp.children ?? const <InlineSpan>[]) {
-          walk(c, off);
-          off += spanLength(c);
-        }
-      }
-    }
-    walk(re.text ?? const TextSpan(text: ''), 0);
-    if (pending.isEmpty) return;
-    final plain = pending.map((e) => e.$2).join();
-    for (final m in _marks.where((m) => !m.isPdf)) {
-      final idx = plain.indexOf(m.text);
-      if (idx < 0) continue;
-      // 把 plain 偏移换算回 pending 片段的 (span内偏移, 片段序号)
-      var acc = 0;
-      for (final (off, seg) in pending) {
-        final rel = idx - acc;
-        if (rel < 0) break;
-        if (rel < seg.length) {
-          final boxes = re.getBoxesForSelection(TextSelection(
-              baseOffset: off + rel.clamp(0, seg.length),
-              extentOffset: off + (rel + m.text.length).clamp(0, seg.length)));
-          final origin = re.localToGlobal(Offset.zero);
-          for (final b in boxes) {
-            out.add((m, Rect.fromLTWH(origin.dx + b.left, origin.dy + b.top, b.right - b.left, b.bottom - b.top)));
-          }
-          break;
-        }
-        acc += seg.length;
-      }
-    }
+    return null;
   }
 
-  // 点击已标注文字：弹复制/删除菜单
-  void _onBodyTap(Offset pos) {
-    for (final (m, r) in _rectNotifier.value) {
-      if (r.inflate(8).contains(pos)) {
-        final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-        showMenu<String>(
-          context: context,
-          position: RelativeRect.fromLTRB(pos.dx, r.top - 48, overlay.size.width - r.right, 0),
-          items: const [
-            PopupMenuItem(value: 'copy', height: 52, child: Text('复制', style: TextStyle(fontSize: 17))),
-            PopupMenuItem(value: 'del', height: 52, child: Text('删除标注', style: TextStyle(fontSize: 17))),
-          ],
-        ).then((v) {
-          if (v == 'copy') {
-            Clipboard.setData(ClipboardData(text: m.text));
-          } else if (v == 'del') {
-            _deleteMark(m);
-          }
-        });
-        return;
-      }
+  void _onBodyTap(Offset globalPos) {
+    final pos = globalPos - _stackOrigin; // 命中判断用 Stack 局部坐标
+    final m = _hitMark(pos);
+    if (m == null) {
+      if (_tapMenuMark != null) setState(() => _tapMenuMark = null);
+      return;
     }
+    final anchor = _rectNotifier.value.firstWhere((e) => e.$1.id == m.id).$2;
+    setState(() => _tapMenuMark = (m, anchor));
   }
 
   // md 选择：flutter_markdown 的 selectable 内部用 SelectableText  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText（与滚动协调正常），
@@ -907,8 +880,38 @@ class _ReaderScreenState extends State<ReaderScreen> {
     if (mounted) setState(() => _mdSelText = t);
   }
 
-  // 选区菜单：框架原生 AdaptiveTextSelectionToolbar（自动定位选区上方、
-  // 层级与可点击性由框架保证），只保留"划线/高亮"两项。
+  // 统一大工具条：选词菜单与点击标注菜单共用同一容器样式
+  Widget markToolbar(List<(String, VoidCallback)> items) => Container(
+        height: 58,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(29),
+          boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 12, offset: Offset(0, 3))],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (i, item) in items.indexed)
+              Padding(
+                padding: EdgeInsets.only(left: i == 0 ? 0 : 6),
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.black87,
+                    backgroundColor: const Color(0xFFF2F2F7),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                    textStyle: const TextStyle(fontSize: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 12),
+                  ),
+                  onPressed: item.$2,
+                  child: Text(item.$1),
+                ),
+              ),
+          ],
+        ),
+      );
+
+  // 选词菜单（划线/高亮）：框架托管定位与层级
   Widget _markMenu(BuildContext menuContext, EditableTextState editor) {
     void mark(bool hl) {
       final t = _mdSelText;
@@ -920,23 +923,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _addMark(t, hl);
     }
 
-    Widget bigBtn(String label, VoidCallback onTap) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.black87,
-              textStyle: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            ),
-            onPressed: onTap,
-            child: Text(label),
-          ),
-        );
     return AdaptiveTextSelectionToolbar(
       anchors: editor.contextMenuAnchors,
       children: [
-        bigBtn('划线', () => mark(false)),
-        bigBtn('高亮', () => mark(true)),
+        markToolbar([
+          ('划线', () => mark(false)),
+          ('高亮', () => mark(true)),
+        ]),
       ],
     );
   }
@@ -1249,11 +1242,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
       default: // md / txt / docx
         if (_content == null) return loading;
         _scheduleMeasure(); // 每帧布局后重测标注矩形（波浪层与点击命中共用）
-        return Stack(children: [
-          // 波浪线自绘层：按实测矩形绘制，置于文字之下、不拦截触摸
+        return Stack(key: _stackKey, children: [
+          // 标注绘制层（矩形已转 Stack 局部坐标）
           Positioned.fill(
             child: IgnorePointer(
-              child: CustomPaint(painter: _WavyPainter(_rectNotifier)),
+              child: CustomPaint(painter: _MarkPainter(_rectNotifier)),
             ),
           ),
           Listener(
@@ -1271,41 +1264,20 @@ class _ReaderScreenState extends State<ReaderScreen> {
             _searchHitBlocks.clear();
             final children = <Widget>[];
             for (final (bi, raw) in blocks.indexed) {
-              // 收集区间：标注（锚点定位）+ 搜索命中，排序去重叠（后者丢弃），从后往前注入 token
-              final spans = <(int, int, String)>[];
-              for (final m in _marks.where((m) => !m.isPdf && m.page == bi)) {
-                // 长锚优先，失败退化为纯文本首现（历史数据 before 可能跨段）
-                var i = m.before.isEmpty ? -1 : raw.indexOf(m.before + m.text);
-                i = i >= 0 ? i + m.before.length : raw.indexOf(m.text);
-                if (i >= 0) {
-                  spans.add((i, i + m.text.length, m.isHighlight ? 'h' : 'u'));
-                }
-              }
-              for (final (s, e) in findMatches(raw, _query)) {
-                spans.add((s, e, 's'));
-              }
-              spans.sort((a, b) => a.$1.compareTo(b.$1));
-              final clean = <(int, int, String)>[];
-              var prevEnd = -1;
-              for (final sp in spans) {
-                if (sp.$1 < prevEnd) continue;
-                clean.add(sp);
-                prevEnd = sp.$2;
-              }
+              // 标注不再注入正文（视觉由矩形层绘制，定位零冲突）；仅搜索命中注入橙色 token
+              final hits = findMatches(raw, _query);
               var data = raw;
               GlobalKey? blockKey;
-              for (final (s, e, t) in clean.reversed) {
-                data = data.replaceRange(s, e, '⟦$t⟧${data.substring(s, e)}⟦/$t⟧');
+              for (final (s, e) in hits.reversed) {
+                data = data.replaceRange(s, e, '⟦s⟧${data.substring(s, e)}⟦/s⟧');
                 blockKey ??= _blockKeys[bi] ??= GlobalKey();
               }
               if (blockKey != null) {
-                for (final m in _marks.where((m) => !m.isPdf)) {
-                  if (raw.contains(m.text)) _markKeys[m.id] ??= blockKey;
-                }
-                _searchHitBlocks.addAll([
-                  for (final sp in clean)
-                    if (sp.$3 == 's') bi
-                ]);
+                _searchHitBlocks.addAll([for (var j = 0; j < hits.length; j++) bi]);
+              }
+              // 标注所在块也要有 key（供矩形测量与跳转定位）
+              if (_marks.any((m) => !m.isPdf && m.page == bi)) {
+                _blockKeys[bi] ??= GlobalKey();
               }
               // MarkdownBody 无内部滚动视图；用滚动版 Markdown 会与外层 ListView 抢手势导致无法滚动
               final w = MarkdownBody(
@@ -1322,7 +1294,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 contextMenuBuilder: (context, editor) =>
                     _mdSelText.isEmpty ? const SizedBox.shrink() : _markMenu(context, editor),
               );
-              children.add(blockKey == null ? w : KeyedSubtree(key: blockKey, child: w));
+              final bk = _blockKeys[bi];
+              children.add(bk == null ? w : KeyedSubtree(key: bk, child: w));
               if (bi < blocks.length - 1) children.add(const SizedBox(height: 8));
             }
             return ListView(
@@ -1333,6 +1306,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
           },
           ),
           ),
+          // 点击标注弹出的工具条（与选词菜单同款），点其他处关闭
+          if (_tapMenuMark != null)
+            Positioned(
+              left: (_tapMenuMark!.$2.left - 30)
+                  .clamp(8.0, MediaQuery.of(context).size.width - 260),
+              top: (_tapMenuMark!.$2.top - 70).clamp(96.0, double.infinity),
+              child: markToolbar([
+                ('复制', () {
+                  Clipboard.setData(ClipboardData(text: _tapMenuMark!.$1.text));
+                  setState(() => _tapMenuMark = null);
+                }),
+                ('删除', () {
+                  final mk = _tapMenuMark!.$1;
+                  setState(() => _tapMenuMark = null);
+                  _deleteMark(mk);
+                }),
+              ]),
+            ),
         ]);
     }
   }
@@ -1352,21 +1343,29 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 }
 
-// 波浪线画笔：对每条标注矩形在文字底部画蓝色波浪（引擎的 wavy 装饰不可用，故自绘）
-class _WavyPainter extends CustomPainter {
-  final ValueNotifier<List<(Mark, Rect)>> notifier;
-  _WavyPainter(this.notifier) : super(repaint: notifier);
+// 标注绘制层：高亮=矩形色块，划线=矩形底部波浪；全部基于实测矩形，排版恒定
+class _MarkPainter extends CustomPainter {
+  final ValueNotifier<List<(Mark, Rect)>> notifier; // rects 已是画布局部坐标
+  _MarkPainter(this.notifier) : super(repaint: notifier);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
+    final wavePaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.2
       ..strokeCap = StrokeCap.round
       ..isAntiAlias = true
       ..color = ulBlue;
+    // 先画全部色块再画波浪（同文字双标注时黄底在上、波浪叠底）
     for (final (m, r) in notifier.value) {
-      if (m.isHighlight) continue; // 高亮不画线
+      if (m.isHighlight) {
+        final hlPaint = Paint()..color = hlYellow.withValues(alpha: 0.82);
+        final rr = RRect.fromRectAndRadius(r.inflate(1), const Radius.circular(3));
+        canvas.drawRRect(rr, hlPaint);
+      }
+    }
+    for (final (m, r) in notifier.value) {
+      if (m.isHighlight) continue;
       final y = r.bottom - 2;
       final path = Path()..moveTo(r.left, y);
       const wave = 9.0, amp = 2.8;
@@ -1378,12 +1377,12 @@ class _WavyPainter extends CustomPainter {
         x = next;
         up = !up;
       }
-      canvas.drawPath(path, paint);
+      canvas.drawPath(path, wavePaint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _WavyPainter old) => true;
+  bool shouldRepaint(covariant _MarkPainter old) => true;
 }
 
 // ---------- 标注面板（搜索 / 跳转 / 删除） ----------// ---------- 标注面板（搜索 / 跳转 / 删除） ----------

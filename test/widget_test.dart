@@ -9,14 +9,6 @@ import 'package:hmd/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 
-bool _hasBg(InlineSpan span) {
-  if (span is TextSpan) {
-    if (span.style?.background != null) return true;
-    return span.children?.any(_hasBg) ?? false;
-  }
-  return false;
-}
-
 String _tmp(String name, List<int> bytes) {
   final f = File('${Directory.systemTemp.path}/hmd_t_$name');
   f.writeAsBytesSync(bytes);
@@ -204,7 +196,7 @@ void main() {
     await t.tapAt(t.getCenter(find.textContaining('世界').first));
     await t.pumpAndSettle();
     expect(find.text('复制'), findsOneWidget);
-    expect(find.text('删除标注'), findsOneWidget);
+    expect(find.text('删除'), findsOneWidget);
   });
 
   testWidgets('阅读页：长按选词→浮条→点高亮→保存渲染消失（一段式）', (t) async {
@@ -225,49 +217,22 @@ void main() {
     // 点击链路受选区手柄 overlay 拦截影响（widget 测试环境局限），由模拟器实测覆盖
   });
 
-  testWidgets('阅读页：预置划线渲染为波浪线（TextSpan 层）', (t) async {
-    final m = Mark('m2', '世界', '你好，', '。', 1, false, false, 1);
-    await saveMarks('t划线.md', [m]);
+  testWidgets('阅读页：标注由矩形绘制层呈现', (t) async {
+    final mu = Mark('mu', '世界', '你好，', '。', 1, false, false, 1);
+    final mh = Mark('mh', '你好', '', '，世界', 2, true, false, 1);
+    await saveMarks('t矩形.md', [mu, mh]);
     await t.pumpWidget(MaterialApp(
       theme: HmdApp.theme('light'),
       home: const ReaderScreen(
-        path: 't.md', title: 't划线.md', initialContent: '# 标\n\n你好，世界。OK',
+        path: 't.md', title: 't矩形.md', initialContent: '# 标\n\n你好，世界。OK',
       ),
     ));
     await t.pumpAndSettle();
-    await t.pump(); // 触发 post-frame 测量
-    // 划线 span 现为排版中性的纯文本，波浪线由自绘层绘制（_WavyPainter 持矩形数据）
+    await t.pump();
     expect(
         find.byWidgetPredicate(
-            (w) => w is CustomPaint && w.painter.runtimeType.toString() == '_WavyPainter'),
+            (w) => w is CustomPaint && w.painter.runtimeType.toString() == '_MarkPainter'),
         findsOneWidget);
   });
 
-  testWidgets('阅读页：跨段旧锚点仍能渲染（退化匹配）', (t) async {
-    // before 含跨段内容（旧版数据），渲染端应退化为纯文本匹配
-    final m = Mark('m3', '世界', '上一段结尾。\n\n你好，', '。', 1, true, false, 2);
-    await saveMarks('t跨段.md', [m]);
-    await t.pumpWidget(MaterialApp(
-      theme: HmdApp.theme('light'),
-      home: const ReaderScreen(
-        path: 't.md', title: 't跨段.md',
-        initialContent: '# 标\n\n上一段结尾。\n\n你好，世界。OK',
-      ),
-    ));
-    await t.pumpAndSettle();
-    expect(find.byWidgetPredicate((w) => (w is SelectableText && w.textSpan != null ? _hasBg(w.textSpan!) : (w is RichText && _hasBg(w.text)))), findsOneWidget);
-  });
-
-  testWidgets('阅读页：预置标注渲染为高亮色块（TextSpan 层）', (t) async {
-    final m = Mark('m1', '世界', '你好，', '。', 1, true, false, 1);
-    await saveMarks('t标注.md', [m]);
-    await t.pumpWidget(MaterialApp(
-      theme: HmdApp.theme('light'),
-      home: const ReaderScreen(
-        path: 't.md', title: 't标注.md', initialContent: '# 标\n\n你好，世界。OK',
-      ),
-    ));
-    await t.pumpAndSettle();
-    expect(find.byWidgetPredicate((w) => (w is SelectableText && w.textSpan != null ? _hasBg(w.textSpan!) : (w is RichText && _hasBg(w.text)))), findsOneWidget);
-  });
 }
