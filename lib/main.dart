@@ -239,76 +239,43 @@ List<String> splitBlocks(String s) {
 // ---------- Markdown 标注 token 渲染（⟦h⟧高亮 ⟦u⟧下划线 ⟦s⟧搜索命中） ----------
 
 class MarkSyntax extends md.InlineSyntax {
-  MarkSyntax() : super(r'⟦([hus])⟧(.+?)⟦/\1⟧');
+  MarkSyntax() : super(r'\u27e6([hus])\u27e7(.+?)\u27e6/\1\u27e7');
   @override
   bool onMatch(md.InlineParser parser, Match match) {
-    parser.addNode(md.Element.text('hmdMark', match[2]!)..attributes['t'] = match[1]!);
+    final t = match[1]!;
+    parser.addNode(md.Element.text(
+        t == 'h' ? 'hmdH' : (t == 'u' ? 'hmdU' : 'hmdS'), match[2]!));
     return true;
   }
 }
 
+// 标注渲染：返回 RichText 而非普通 Widget——flutter_markdown 的 inline 合并器
+// 会把 RichText 的 span 提取出来与相邻文本重新合并，排版与未标注时完全一致。
 class MarkBuilder extends MarkdownElementBuilder {
+  final String kind; // h 高亮 / u 波浪划线 / s 搜索
+  MarkBuilder(this.kind);
 
   @override
-  Widget? visitElementAfterWithContext(
-      BuildContext context, md.Element element, TextStyle? preferredStyle, TextStyle? parentStyle) {
-    final text = element.textContent;
-    final st = preferredStyle ?? TextStyle(fontSize: appFont.value, height: 1.7);
-    final t = element.attributes['t'];
-    if (t == 'h' || t == 's') {
-      return Container(
-        decoration: BoxDecoration(
-            color: (t == 'h' ? hlYellow : searchOrange).withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(3)),
-        child: Text(text, style: st),
+  Widget? visitElementAfterWithContext(BuildContext context, md.Element element,
+      TextStyle? preferredStyle, TextStyle? parentStyle) {
+    final base = parentStyle ?? preferredStyle ?? TextStyle(fontSize: appFont.value, height: 1.7);
+    final TextStyle st;
+    if (kind == 'u') {
+      st = base.copyWith(
+        decoration: TextDecoration.underline,
+        decorationStyle: TextDecorationStyle.wavy,
+        decorationColor: ulBlue,
+        decorationThickness: 4,
       );
+    } else {
+      st = base.copyWith(
+          background: Paint()
+            ..color = (kind == 'h' ? hlYellow : searchOrange).withValues(alpha: 0.85));
     }
-    // 自绘波浪线：TextDecoration 在部分场景渲染过细/被吞，改用 CustomPaint 保证可见
-    return Stack(children: [
-      Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Text(text, style: st),
-      ),
-      Positioned(
-        left: 0,
-        right: 0,
-        bottom: 0,
-        child: SizedBox(height: 6, child: CustomPaint(painter: _WavyPainter())),
-      ),
-    ]);
+    return RichText(text: TextSpan(text: element.textContent, style: st));
   }
 }
 
-class _WavyPainter extends CustomPainter {
-  const _WavyPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final mid = size.height / 2;
-    final p = Path()..moveTo(0, mid);
-    const wave = 8.0, amp = 2.6;
-    var x = 0.0;
-    var up = true;
-    while (x < size.width) {
-      final next = x + wave / 2;
-      p.quadraticBezierTo((x + next) / 2, up ? mid - amp : mid + amp, next, mid);
-      x = next;
-      up = !up;
-    }
-    canvas.drawPath(
-      p,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..strokeCap = StrokeCap.round
-        ..isAntiAlias = true
-        ..color = ulBlue,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
 
 const searchOrange = Color(0xFFFFB86B);
 
@@ -737,8 +704,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final src = _kind == DocKind.epub ? _html!.join('\n') : (_content ?? '');
     final i = src.indexOf(text);
     if (i < 0) return;
-    final b = src.substring((i - 16).clamp(0, src.length), i);
-    final e = (i + text.length + 16).clamp(0, src.length);
+    // 锚点截到同一行内：跨段的上下文会让渲染时的段内匹配失败
+    final lineStart = i > 0 ? src.lastIndexOf('\n', i - 1) + 1 : 0;
+    final lineEnd = src.indexOf('\n', i + text.length);
+    final b = src.substring((i - 16).clamp(lineStart, src.length), i);
+    final e = (i + text.length + 16).clamp(0, lineEnd < 0 ? src.length : lineEnd);
     final a = src.substring(i + text.length, e);
     var page = 0;
     if (_kind == DocKind.epub) {
@@ -1132,10 +1102,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
               // 收集区间：标注（锚点定位）+ 搜索命中，排序去重叠（后者丢弃），从后往前注入 token
               final spans = <(int, int, String)>[];
               for (final m in _marks.where((m) => !m.isPdf)) {
-                final i = raw.indexOf(m.before + m.text);
+                // 长锚优先，失败退化为纯文本首现（历史数据 before 可能跨段）
+                var i = m.before.isEmpty ? -1 : raw.indexOf(m.before + m.text);
+                i = i >= 0 ? i + m.before.length : raw.indexOf(m.text);
                 if (i >= 0) {
-                  spans.add((i + m.before.length,
-                      i + m.before.length + m.text.length, m.isHighlight ? 'h' : 'u'));
+                  spans.add((i, i + m.text.length, m.isHighlight ? 'h' : 'u'));
                 }
               }
               for (final (s, e) in findMatches(raw, _query)) {
@@ -1157,7 +1128,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
               }
               if (blockKey != null) {
                 for (final m in _marks.where((m) => !m.isPdf)) {
-                  if (raw.contains(m.before + m.text)) _markKeys[m.id] ??= blockKey;
+                  if (raw.contains(m.text)) _markKeys[m.id] ??= blockKey;
                 }
                 _searchHitBlocks.addAll([
                   for (final sp in clean)
@@ -1170,7 +1141,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 shrinkWrap: true,
                 styleSheet: _mdStyle(context, fs),
                 inlineSyntaxes: [MarkSyntax()],
-                builders: {'hmdMark': MarkBuilder()},
+                builders: {
+                  'hmdH': MarkBuilder('h'),
+                  'hmdU': MarkBuilder('u'),
+                  'hmdS': MarkBuilder('s'),
+                },
               );
               children.add(blockKey == null ? w : KeyedSubtree(key: blockKey, child: w));
               if (bi < blocks.length - 1) children.add(const SizedBox(height: 8));
@@ -1186,7 +1161,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   static MarkdownStyleSheet _mdStyle(BuildContext c, double fs) {
     final base = MarkdownStyleSheet.fromTheme(Theme.of(c));
-    return base.copyWith(
+    final ss = base.copyWith(
       p: base.p?.copyWith(fontSize: fs, height: 1.7),
       h1: base.h1?.copyWith(fontSize: fs * 1.6),
       h2: base.h2?.copyWith(fontSize: fs * 1.4),
@@ -1195,6 +1170,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       code: base.code?.copyWith(fontSize: fs * 0.92),
       blockSpacing: 8,
     );
+    return ss;
   }
 }
 

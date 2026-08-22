@@ -8,6 +8,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hmd/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+bool _hasWavy(InlineSpan span) {
+  if (span is TextSpan) {
+    final st = span.style;
+    if (st?.decoration == TextDecoration.underline &&
+        st?.decorationStyle == TextDecorationStyle.wavy) {
+      return true;
+    }
+    return span.children?.any(_hasWavy) ?? false;
+  }
+  return false;
+}
+
+bool _hasBg(InlineSpan span) {
+  if (span is TextSpan) {
+    if (span.style?.background != null) return true;
+    return span.children?.any(_hasBg) ?? false;
+  }
+  return false;
+}
+
 String _tmp(String name, List<int> bytes) {
   final f = File('${Directory.systemTemp.path}/hmd_t_$name');
   f.writeAsBytesSync(bytes);
@@ -156,7 +176,7 @@ void main() {
     expect(HmdApp.theme('green').scaffoldBackgroundColor, const Color(0xFFCDE8CF));
   });
 
-  testWidgets('阅读页：预置划线渲染为波浪线', (t) async {
+  testWidgets('阅读页：预置划线渲染为波浪线（TextSpan 层）', (t) async {
     final m = Mark('m2', '世界', '你好，', '。', 1, false, false, 0);
     await saveMarks('t划线.md', [m]);
     await t.pumpWidget(MaterialApp(
@@ -166,13 +186,25 @@ void main() {
       ),
     ));
     await t.pumpAndSettle();
-    expect(
-        find.byWidgetPredicate(
-            (w) => w is CustomPaint && w.painter.runtimeType.toString() == '_WavyPainter'),
-        findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is RichText && _hasWavy(w.text)), findsOneWidget);
   });
 
-  testWidgets('阅读页：预置标注渲染为高亮色块', (t) async {
+  testWidgets('阅读页：跨段旧锚点仍能渲染（退化匹配）', (t) async {
+    // before 含跨段内容（旧版数据），渲染端应退化为纯文本匹配
+    final m = Mark('m3', '世界', '上一段结尾。\n\n你好，', '。', 1, true, false, 0);
+    await saveMarks('t跨段.md', [m]);
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't跨段.md',
+        initialContent: '# 标\n\n上一段结尾。\n\n你好，世界。OK',
+      ),
+    ));
+    await t.pumpAndSettle();
+    expect(find.byWidgetPredicate((w) => w is RichText && _hasBg(w.text)), findsOneWidget);
+  });
+
+  testWidgets('阅读页：预置标注渲染为高亮色块（TextSpan 层）', (t) async {
     final m = Mark('m1', '世界', '你好，', '。', 1, true, false, 0);
     await saveMarks('t标注.md', [m]);
     await t.pumpWidget(MaterialApp(
@@ -182,11 +214,6 @@ void main() {
       ),
     ));
     await t.pumpAndSettle();
-    expect(
-        find.byWidgetPredicate((w) =>
-            w is Container &&
-            w.decoration is BoxDecoration &&
-            (w.decoration as BoxDecoration).color == hlYellow.withValues(alpha: 0.85)),
-        findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is RichText && _hasBg(w.text)), findsOneWidget);
   });
 }
