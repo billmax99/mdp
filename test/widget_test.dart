@@ -19,7 +19,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await initPrefs();
     appFont.value = 18;
-    appDark.value = false;
+    appTheme.value = 'light';
   });
 
   testWidgets('主页：标题与大按钮存在，无 recent 时空状态可见', (t) async {
@@ -32,7 +32,7 @@ void main() {
 
   testWidgets('阅读页：渲染 md 标题与正文', (t) async {
     await t.pumpWidget(MaterialApp(
-      theme: HmdApp.theme(Brightness.light),
+      theme: HmdApp.theme('light'),
       home: const ReaderScreen(
         path: 'test.md',
         title: '测试.md',
@@ -48,7 +48,7 @@ void main() {
 
   testWidgets('阅读页：点 A+ 增大字号并持久化，到上限禁用', (t) async {
     await t.pumpWidget(MaterialApp(
-      theme: HmdApp.theme(Brightness.light),
+      theme: HmdApp.theme('light'),
       home: const ReaderScreen(
           path: 'test.md', title: '字号.md', initialContent: '正文'),
     ));
@@ -120,5 +120,57 @@ void main() {
     final r = safeName('${'超' * 200}.md');
     expect(r.length, 80);
     expect(r.endsWith('.md'), isTrue);
+  });
+
+  test('Mark json 往返', () {
+    final m = const Mark('id1', '文本', '前', '后', 1700000000000, true, false, 3);
+    final back = Mark.fromJson(jsonDecode(jsonEncode(m.toJson())));
+    expect(back!.text, '文本');
+    expect(back.isHighlight, isTrue);
+    expect(back.isPdf, isFalse);
+    expect(back.page, 3);
+    expect(Mark.fromJson('bad'), isNull);
+  });
+
+  test('splitBlocks：代码块内空行不切断', () {
+    const src = '段落一\n\n```\ncode\n\nstill code\n```\n\n段落二';
+    final blocks = splitBlocks(src);
+    expect(blocks.length, 3);
+    expect(blocks[1], contains('still code'));
+  });
+
+  test('findMatches：大小写不敏感、非重叠', () {
+    expect(findMatches('AbcaBc', 'abc'), [(0, 3), (3, 6)]);
+    expect(findMatches('无匹配', 'xyz'), isEmpty);
+    expect(findMatches('任何', ''), isEmpty);
+  });
+
+  test('injectHtmlSearch 注入橙色 span', () {
+    final s = injectHtmlSearch('<p>Hello world</p>', 'hello');
+    expect(s, contains('#FFB86B'));
+    expect(s, contains('>Hello</span>'));
+  });
+
+  test('主题表覆盖六种且背景色正确', () {
+    expect(themes.keys.toSet(), {'light', 'dark', 'paper', 'warm', 'green', 'blue'});
+    expect(HmdApp.theme('green').scaffoldBackgroundColor, const Color(0xFFCDE8CF));
+  });
+
+  testWidgets('阅读页：预置标注渲染为高亮色块', (t) async {
+    final m = Mark('m1', '世界', '你好，', '。', 1, true, false, 0);
+    await saveMarks('t标注.md', [m]);
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't标注.md', initialContent: '# 标\n\n你好，世界。OK',
+      ),
+    ));
+    await t.pumpAndSettle();
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration as BoxDecoration).color == hlYellow.withValues(alpha: 0.85)),
+        findsOneWidget);
   });
 }
