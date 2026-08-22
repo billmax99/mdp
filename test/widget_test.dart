@@ -156,6 +156,22 @@ void main() {
     expect(HmdApp.theme('green').scaffoldBackgroundColor, const Color(0xFFCDE8CF));
   });
 
+  testWidgets('阅读页：预置划线渲染为波浪线', (t) async {
+    final m = Mark('m2', '世界', '你好，', '。', 1, false, false, 0);
+    await saveMarks('t划线.md', [m]);
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't划线.md', initialContent: '# 标\n\n你好，世界。OK',
+      ),
+    ));
+    await t.pumpAndSettle();
+    expect(
+        find.byWidgetPredicate(
+            (w) => w is CustomPaint && w.painter.runtimeType.toString() == '_WavyPainter'),
+        findsOneWidget);
+  });
+
   testWidgets('阅读页：预置标注渲染为高亮色块', (t) async {
     final m = Mark('m1', '世界', '你好，', '。', 1, true, false, 0);
     await saveMarks('t标注.md', [m]);

@@ -250,15 +250,51 @@ class MarkBuilder extends MarkdownElementBuilder {
         child: Text(text, style: st),
       );
     }
-    return Text(
-      text,
-      style: st.copyWith(
-        decoration: TextDecoration.underline,
-        decorationColor: ulBlue,
-        decorationThickness: 2.5,
+    // 自绘波浪线：TextDecoration 在部分场景渲染过细/被吞，改用 CustomPaint 保证可见
+    return Stack(children: [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text(text, style: st),
       ),
+      Positioned(
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: SizedBox(height: 6, child: CustomPaint(painter: _WavyPainter())),
+      ),
+    ]);
+  }
+}
+
+class _WavyPainter extends CustomPainter {
+  const _WavyPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final mid = size.height / 2;
+    final p = Path()..moveTo(0, mid);
+    const wave = 8.0, amp = 2.6;
+    var x = 0.0;
+    var up = true;
+    while (x < size.width) {
+      final next = x + wave / 2;
+      p.quadraticBezierTo((x + next) / 2, up ? mid - amp : mid + amp, next, mid);
+      x = next;
+      up = !up;
+    }
+    canvas.drawPath(
+      p,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round
+        ..isAntiAlias = true
+        ..color = ulBlue,
     );
   }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 const searchOrange = Color(0xFFFFB86B);
