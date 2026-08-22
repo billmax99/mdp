@@ -8,22 +8,22 @@ S = 1024
 
 
 def draw_md(text_color, px):
-    """透明画布上画居中的 MD 字样，字高约 px 像素"""
-    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    f = ImageFont.truetype(FONT, px)
-    box = d.textbbox((0, 0), "MD", font=f)
-    w, h = box[2] - box[0], box[3] - box[1]
-    d.text(((S - w) / 2 - box[0], (S - h) / 2 - box[1]), "MD+", font=f, fill=text_color)
-    return img
+    """透明 1024 画布上画精确居中的 MD+ 字样（两步墨迹法，免疫字体测量偏差）"""
+    tmp = Image.new("RGBA", (S * 2, S * 2), (0, 0, 0, 0))
+    ImageDraw.Draw(tmp).text((S // 2, S // 2), "MD+", font=ImageFont.truetype(FONT, px), fill=text_color)
+    bbox = tmp.getbbox()  # 实际墨迹范围
+    glyph = tmp.crop(bbox)
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    out.alpha_composite(glyph, ((S - glyph.width) // 2, (S - glyph.height) // 2))
+    return out
 
 
-# 自适应图标前景：字高 300（中心安全区 ~61% 即 ~624px 内）
-draw_md((255, 255, 255, 255), 300).save("tool/icons/icon_fg.png")
+# 自适应图标前景：字号 270（墨迹宽约 547px，中心安全区 ~624px 内）
+draw_md((255, 255, 255, 255), 270).save("tool/icons/icon_fg.png")
 
-# legacy 整图：蓝底 + 白 MD
+# legacy 整图：蓝底 + 白 MD+
 legacy = Image.new("RGBA", (S, S), BLUE)
-legacy.alpha_composite(draw_md((255, 255, 255, 255), 370))
+legacy.alpha_composite(draw_md((255, 255, 255, 255), 340))
 legacy.convert("RGB").save("tool/icons/icon_legacy.png")
 
 # Windows ico（多尺寸）
