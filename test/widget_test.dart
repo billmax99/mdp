@@ -31,6 +31,44 @@ void main() {
     expect(find.text('还没有文档'), findsOneWidget);
   });
 
+  testWidgets('主页：左滑删除记录，长按可删单条，清空按钮全清', (t) async {
+    await saveRecent([
+      RecentRec('a.md', 1),
+      RecentRec('b.md', 2),
+    ]);
+    await t.pumpWidget(const HmdApp());
+    await t.pumpAndSettle();
+    expect(find.text('a.md'), findsOneWidget);
+    expect(find.text('b.md'), findsOneWidget);
+    // 左滑第一条（a.md）→ 直接删
+    await t.drag(find.text('a.md'), const Offset(-500, 0));
+    await t.pumpAndSettle();
+    expect(find.text('a.md'), findsNothing);
+    expect(find.text('b.md'), findsOneWidget);
+    expect(loadRecent().map((r) => r.name), ['b.md']);
+    // 长按 b.md → 确认框 → 删除
+    await t.longPress(find.text('b.md'));
+    await t.pumpAndSettle();
+    expect(find.text('删除这条记录？'), findsOneWidget);
+    await t.tap(find.text('删除'));
+    await t.pumpAndSettle();
+    expect(find.text('b.md'), findsNothing);
+    expect(loadRecent(), isEmpty);
+    expect(find.text('还没有文档'), findsOneWidget);
+    // 重新加入两条 → 清空按钮 → 确认 → 全清（换 key 强制重建 HomeScreen 重新读 prefs）
+    await saveRecent([RecentRec('c.md', 3), RecentRec('d.md', 4)]);
+    await t.pumpWidget(const KeyedSubtree(key: ValueKey('v2'), child: HmdApp()));
+    await t.pumpAndSettle();
+    await t.tap(find.text('清空'));
+    await t.pumpAndSettle();
+    expect(find.text('清空全部记录？'), findsOneWidget);
+    await t.tap(find.text('清空').last); // 对话框里的确认按钮
+    await t.pumpAndSettle();
+    expect(find.text('c.md'), findsNothing);
+    expect(find.text('d.md'), findsNothing);
+    expect(loadRecent(), isEmpty);
+  });
+
   testWidgets('阅读页：渲染 md 标题与正文', (t) async {
     await t.pumpWidget(MaterialApp(
       theme: HmdApp.theme('light'),
@@ -215,6 +253,51 @@ void main() {
     expect(find.text('划线'), findsOneWidget);
     expect(find.text('高亮'), findsOneWidget);
     // 点击链路受选区手柄 overlay 拦截影响（widget 测试环境局限），由模拟器实测覆盖
+  });
+
+  // 真机回归：选词在中间块（非末块）时浮条也必须出现——
+  // 曾经 _selAnchor 在块循环内被重置，锚点随后续块丢失导致真机菜单永不弹出
+  testWidgets('阅读页：多块文档选词在非末块，浮条仍出现', (t) async {
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't多块.md',
+        initialContent: '# 标\n\n白日依山尽，黄河入海流。\n\n这里是最后一段尾巴',
+      ),
+    ));
+    await t.pumpAndSettle();
+    final g = await t.startGesture(t.getCenter(find.text('白日依山尽，黄河入海流。').first));
+    await t.pump(const Duration(milliseconds: 600));
+    await g.up();
+    await t.pumpAndSettle();
+    expect(find.text('划线'), findsOneWidget);
+    expect(find.text('高亮'), findsOneWidget);
+  });
+
+  // 真机回归：同词在全文多处出现时，标注必须锚定到实际选中处而非全文首现
+  // （曾在真机暴露：选第三行的词，黄块画到第一行同词处）
+  testWidgets('阅读页：同词多处，标注锚定选中处而非首现', (t) async {
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't同词.md',
+        initialContent: '# 标\n\n前文苹果。\n\n后文苹果。',
+      ),
+    ));
+    await t.pumpAndSettle();
+    // 长按第二段的"苹果"（"后文苹果。"第 3 字处）
+    final rect = t.getRect(find.textContaining('后文苹果。'));
+    final g = await t.startGesture(Offset(rect.left + rect.width * 0.55, rect.center.dy));
+    await t.pump(const Duration(milliseconds: 600));
+    await g.up();
+    await t.pumpAndSettle();
+    await t.tap(find.text('高亮'));
+    await t.pumpAndSettle();
+    final marks = loadMarks('t同词.md');
+    expect(marks, isNotEmpty);
+    // 选中处的直接前文是"后文"二字；若错标到首现处，before 将是第一段的上下文
+    expect(marks.last.before, contains('后文'));
+    expect(marks.last.page, 2);
   });
 
   testWidgets('阅读页：标注由矩形绘制层呈现', (t) async {

@@ -482,6 +482,63 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _recent = loadRecent());
   }
 
+  // 删除单条记录：连同应用内文件副本与该文件的标注一起清理
+  Future<void> _removeRec(RecentRec r) async {
+    setState(() => _recent.removeWhere((x) => x.name == r.name));
+    await saveRecent(_recent);
+    await _purgeFiles([r.name]);
+  }
+
+  Future<void> _purgeFiles(List<String> names) async {
+    final dir = (await docsDir()).path;
+    for (final n in names) {
+      try {
+        await File('$dir${Platform.pathSeparator}$n').delete();
+      } catch (_) {}
+      try {
+        await prefs.remove('marks_$n');
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _confirmRemove(RecentRec r) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除这条记录？'),
+        content: Text('「${r.name}」的应用内副本与标注会一并删除。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok == true && mounted) await _removeRec(r);
+  }
+
+  Future<void> _confirmClearAll() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空全部记录？'),
+        content: const Text('所有文件的应用内副本与标注会一并删除，不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('清空')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final names = [for (final r in _recent) r.name];
+    setState(() => _recent.clear());
+    await saveRecent(_recent);
+    await _purgeFiles(names);
+    _toast('已清空');
+  }
+
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -533,9 +590,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 ]),
               )
             else ...[
-              const Padding(
-                padding: EdgeInsets.only(left: 12, bottom: 8),
-                child: Text('最近', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: iosGray)),
+              Padding(
+                padding: const EdgeInsets.only(left: 12, bottom: 8),
+                child: Row(children: [
+                  const Text('最近',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: iosGray)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: _confirmClearAll,
+                    style: TextButton.styleFrom(
+                        foregroundColor: iosGray,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 30),
+                        textStyle: const TextStyle(fontSize: 13)),
+                    child: const Text('清空'),
+                  ),
+                ]),
               ),
               ClipRRect(
                 borderRadius: BorderRadius.circular(16),
@@ -563,31 +633,43 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _row(RecentRec r, Color card) => InkWell(
-        onTap: () => _open(r),
-        child: Container(
-          height: 64,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          color: card,
-          child: Row(children: [
-            Icon(iconFor(r.name), size: 28, color: iosBlue),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(r.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 2),
-                  Text(_fmtDate(r.openedAt), style: const TextStyle(fontSize: 13, color: iosGray)),
-                ],
+  Widget _row(RecentRec r, Color card) => Dismissible(
+        key: ValueKey(r.name),
+        direction: DismissDirection.endToStart, // 只左滑
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 22),
+          color: Colors.redAccent,
+          child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 26),
+        ),
+        onDismissed: (_) => _removeRec(r),
+        child: InkWell(
+          onTap: () => _open(r),
+          onLongPress: () => _confirmRemove(r),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            color: card,
+            child: Row(children: [
+              Icon(iconFor(r.name), size: 28, color: iosBlue),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(r.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    Text(_fmtDate(r.openedAt), style: const TextStyle(fontSize: 13, color: iosGray)),
+                  ],
+                ),
               ),
-            ),
-            const Icon(Icons.chevron_right_rounded, size: 22, color: iosGray),
-          ]),
+              const Icon(Icons.chevron_right_rounded, size: 22, color: iosGray),
+            ]),
+          ),
         ),
       );
 
@@ -641,6 +723,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Offset? _lastTapDown;
   (Mark, Rect)? _tapMenuMark; // 点击标注弹出的工具条（mark + 锚矩形）
   Rect? _selAnchor; // 当前选区的锚矩形（选词工具条定位）
+  String? _selCtx; // 选中处前后 16 字上下文（真实位置锚定，防同词首现错位）
   int _mdEpoch = 0; // 递增以强制重建 MarkdownBody，从而清除系统选区
   final _stackKey = GlobalKey(); // body Stack：矩形局部坐标系的基准
   Offset _stackOrigin = Offset.zero;
@@ -707,11 +790,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   // ---- 标注 ----
 
-  Future<void> _addMark(String text, bool hl) async {
+  Future<void> _addMark(String text, bool hl, [String? selCtx]) async {
     text = text.trim();
     if (text.isEmpty || text.length > 500) return;
     final src = _kind == DocKind.epub ? _html!.join('\n') : (_content ?? '');
-    final i = src.indexOf(text);
+    var i = src.indexOf(text);
+    // 优先用选中处的直接上下文定位：同词在全文多处出现时，全文首现会标错位置
+    if (selCtx != null && selCtx.contains(text)) {
+      final ci = src.indexOf(selCtx);
+      if (ci >= 0) i = ci + selCtx.indexOf(text);
+    }
     if (i < 0) return;
     // 锚点截到同一行内：跨段的上下文会让渲染时的段内匹配失败
     final lineStart = i > 0 ? src.lastIndexOf('\n', i - 1) + 1 : 0;
@@ -819,8 +907,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
           acc += len;
         }
         if (runs.isEmpty) continue;
-
-        _selAnchor = null; // 每次重测重定位选区锚点
         // 直接在每个渲染对象自身的文本里锚定匹配，取其选择盒（不做全局偏移换算，
         // run 自己的文本与盒子天然同坐标系，杜绝错位）
         for (final r in runs.map((e) => e.$3)) {
@@ -876,12 +962,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
   // 选词菜单动作：标注 + 清选区（重建 MarkdownBody）+ 收工具条
   void _markFromSelection(bool hl) {
     final t = _mdSelText;
+    final ctx = _selCtx; // 真实选中处的前后文，杜绝同词在前文出现时标错位置
     setState(() {
       _mdSelText = '';
       _selAnchor = null;
       _mdEpoch++; // 重建清空系统选区
     });
-    _addMark(t, hl);
+    _addMark(t, hl, ctx);
   }
 
   // 点击已标注文字：弹与选词菜单同款的工具条（复制/删除）
@@ -900,18 +987,34 @@ class _ReaderScreenState extends State<ReaderScreen> {
       return;
     }
     final anchor = _rectNotifier.value.firstWhere((e) => e.$1.id == m.id).$2;
-    setState(() => _tapMenuMark = (m, anchor));
+    // 两菜单互斥：长按标注文字会同时产生选区与命中，选词菜单必须让位，
+    // 否则两菜单 clamp 到同一位置重叠，点"删除"实际误触下层"高亮"
+    setState(() {
+      _tapMenuMark = (m, anchor);
+      _mdSelText = '';
+      _selAnchor = null;
+      _selCtx = null;
+    });
   }
 
   // md 选择：flutter_markdown 的 selectable 内部用 SelectableText  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText（与滚动协调正常），
   // 选中文本经 onSelectionChanged 直接回调，不依赖系统剪贴板（真机管控下不可靠）。
   void _onMdSelection(String? text, TextSelection selection, SelectionChangedCause? cause) {
     final t = selectedOf(text, selection);
+    // 先更新选中处前后 16 字上下文（同词在不同位置重选时 t 相同但 ctx 不同，不能提前 return）
+    if (t.isNotEmpty && text != null && !selection.isCollapsed) {
+      final b = (selection.start - 16).clamp(0, text.length);
+      final e = (selection.end + 16).clamp(0, text.length);
+      _selCtx = text.substring(b, selection.start) + t + text.substring(selection.end, e);
+    } else {
+      _selCtx = null;
+    }
     if (t == _mdSelText) return;
     if (mounted) {
       setState(() {
         _mdSelText = t;
         if (t.isEmpty) _selAnchor = null;
+        if (t.isNotEmpty) _tapMenuMark = null; // 新选区时关点击菜单（互斥）
       });
     }
   }
