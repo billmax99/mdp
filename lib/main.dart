@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
@@ -722,8 +723,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _measureScheduled = false;
   Offset? _lastTapDown;
   (Mark, Rect)? _tapMenuMark; // 点击标注弹出的工具条（mark + 锚矩形）
-  Rect? _selAnchor; // 当前选区的锚矩形（选词工具条定位）
   String? _selCtx; // 选中处前后 16 字上下文（真实位置锚定，防同词首现错位）
+  // 选词工具条定位：直接用长按的按点（必在选中词上）——测量选区矩形曾反复错位，
+  // 按点方案零测量、零坐标系换算歧义（top 需减 body Stack 原点）
+  Offset? _selPoint;
   int _mdEpoch = 0; // 递增以强制重建 MarkdownBody，从而清除系统选区
   final _stackKey = GlobalKey(); // body Stack：矩形局部坐标系的基准
   Offset _stackOrigin = Offset.zero;
@@ -882,9 +885,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _measureScheduled = false;
       if (!mounted || _kind == DocKind.pdf) return;
-      final oldAnchor = _selAnchor;
       final out = <(Mark, Rect)>[];
-      _selAnchor = null; // 每次重测重定位选区锚点（循环外重置一次）
       for (final bi in _blockKeys.keys.toList()..sort()) {
         final ctx = _blockKeys[bi]?.currentContext;
         if (ctx == null) continue;
@@ -909,23 +910,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
         if (runs.isEmpty) continue;
         // 直接在每个渲染对象自身的文本里锚定匹配，取其选择盒（不做全局偏移换算，
         // run 自己的文本与盒子天然同坐标系，杜绝错位）
-        for (final r in runs.map((e) => e.$3)) {
+        for (final (_, _, r) in runs) {
           final runText = (r.text as InlineSpan).toPlainText();
           if (runText.isEmpty) continue;
-          // 选区锚点：当前选中词在本 run 的顶矩形（选词工具条定位）
-          if (_mdSelText.isNotEmpty && _selAnchor == null) {
-            final si = runText.indexOf(_mdSelText);
-            if (si >= 0) {
-              final sbx = (r.getBoxesForSelection as dynamic)(
-                  TextSelection(baseOffset: si, extentOffset: si + _mdSelText.length)) as List;
-              if (sbx.isNotEmpty) {
-                final b0 = sbx.first;
-                final org = (r.localToGlobal as dynamic)(Offset.zero) as Offset;
-                _selAnchor = Rect.fromLTWH(org.dx + b0.left, org.dy + b0.top,
-                    b0.right - b0.left, b0.bottom - b0.top);
-              }
-            }
-          }
           for (final m in _marks.where((m) => !m.isPdf && m.page == bi)) {
             var i = m.before.isEmpty ? -1 : runText.indexOf(m.before + m.text);
             i = i >= 0 ? i + m.before.length : runText.indexOf(m.text);
@@ -947,7 +934,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _stackOrigin = so;
       final local = [for (final (m, r) in out) (m, r.shift(-so))];
       if (mounted && !_sameRects(_rectNotifier.value, local)) _rectNotifier.value = local;
-      if (mounted && _selAnchor != oldAnchor) setState(() {}); // 工具条出现/收起
     });
   }
 
@@ -965,7 +951,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final ctx = _selCtx; // 真实选中处的前后文，杜绝同词在前文出现时标错位置
     setState(() {
       _mdSelText = '';
-      _selAnchor = null;
+      _selPoint = null;
       _mdEpoch++; // 重建清空系统选区
     });
     _addMark(t, hl, ctx);
@@ -992,8 +978,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
     setState(() {
       _tapMenuMark = (m, anchor);
       _mdSelText = '';
-      _selAnchor = null;
       _selCtx = null;
+      _selPoint = null;
     });
   }
 
@@ -1001,53 +987,67 @@ class _ReaderScreenState extends State<ReaderScreen> {
   // 选中文本经 onSelectionChanged 直接回调，不依赖系统剪贴板（真机管控下不可靠）。
   void _onMdSelection(String? text, TextSelection selection, SelectionChangedCause? cause) {
     final t = selectedOf(text, selection);
-    // 先更新选中处前后 16 字上下文（同词在不同位置重选时 t 相同但 ctx 不同，不能提前 return）
+    // 先更新选中处前后 16 字上下文与精确偏移（同词在不同位置重选时 t 相同但 ctx 不同，不能提前 return）
     if (t.isNotEmpty && text != null && !selection.isCollapsed) {
       final b = (selection.start - 16).clamp(0, text.length);
       final e = (selection.end + 16).clamp(0, text.length);
       _selCtx = text.substring(b, selection.start) + t + text.substring(selection.end, e);
+      if (_lastTapDown != null) _selPoint = _lastTapDown; // 按点即词上
     } else {
       _selCtx = null;
+      _selPoint = null;
     }
     if (t == _mdSelText) return;
     if (mounted) {
       setState(() {
         _mdSelText = t;
-        if (t.isEmpty) _selAnchor = null;
+        if (t.isEmpty) _selPoint = null;
         if (t.isNotEmpty) _tapMenuMark = null; // 新选区时关点击菜单（互斥）
       });
     }
   }
 
   // 统一大工具条：选词菜单与点击标注菜单共用同一容器样式
-  Widget markToolbar(List<(String, VoidCallback)> items) => Container(
-        padding: const EdgeInsets.all(8), // 不设固定高，由内容自然撑起，杜绝文字被裁
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 12, offset: Offset(0, 3))],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final (i, item) in items.indexed)
-              Padding(
-                padding: EdgeInsets.only(left: i == 0 ? 0 : 8),
-                // 自绘按钮：无框架内建约束，文字渲染稳定不被裁（InkWell/Material 在菜单容器中实测塌陷为 0 高）
-                child: GestureDetector(
-                  onTap: item.$2,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF2F2F7),
-                      borderRadius: BorderRadius.circular(10),
+  // 统一磨砂玻璃工具条：白磨砂底 + 模糊背景；按钮彩色底一眼区分
+  // （划线=蓝、高亮=黄、复制=蓝、删除=红），黄底配黑字其余白字
+  Widget markToolbar(List<(String, VoidCallback, Color)> items) => ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            padding: const EdgeInsets.all(8), // 不设固定高，由内容自然撑起，杜绝文字被裁
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.7), // 磨砂白：透出底下文字的模糊影子
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.65), width: 0.6),
+              boxShadow: const [BoxShadow(color: Color(0x2E000000), blurRadius: 14, offset: Offset(0, 3))],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (i, item) in items.indexed)
+                  Padding(
+                    padding: EdgeInsets.only(left: i == 0 ? 0 : 8),
+                    // 自绘按钮：无框架内建约束，文字渲染稳定不被裁（InkWell/Material 在菜单容器中实测塌陷为 0 高）
+                    child: GestureDetector(
+                      onTap: item.$2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: item.$3,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(item.$1,
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: item.$3 == hlYellow ? Colors.black87 : Colors.white)),
+                      ),
                     ),
-                    child: Text(item.$1,
-                        style: const TextStyle(fontSize: 16, color: Colors.black87)),
                   ),
-                ),
-              ),
-          ],
+              ],
+            ),
+          ),
         ),
       );
 
@@ -1418,14 +1418,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
           ),
           ),
           // 选词工具条（划线/高亮）：出现在选中词上方，与点击菜单同款组件
-          if (_mdSelText.isNotEmpty && _selAnchor != null)
+          if (_mdSelText.isNotEmpty && _selPoint != null)
             Positioned(
-              left: (_selAnchor!.left - 40)
+              left: (_selPoint!.dx - _stackOrigin.dx - 40)
                   .clamp(8.0, MediaQuery.of(context).size.width - 250),
-              top: (_selAnchor!.top - 76).clamp(96.0, double.infinity),
+              // 按点必在词上：菜单放按点(=词)上方；上方空间不足就贴 Stack 顶
+              // （贴顶也必然在词上方——词就在第一屏上部时用户仍看到菜单在文字上方）
+              top: () {
+                final rel = _selPoint!.dy - _stackOrigin.dy;
+                return rel - 68 >= 4 ? rel - 68 : 4.0;
+              }(),
               child: markToolbar([
-                ('划线', () => _markFromSelection(false)),
-                ('高亮', () => _markFromSelection(true)),
+                ('划线', () => _markFromSelection(false), iosBlue),
+                ('高亮', () => _markFromSelection(true), hlYellow),
               ]),
             ),
           // 点击标注弹出的工具条（与选词菜单同款），点其他处关闭
@@ -1433,17 +1438,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
             Positioned(
               left: (_tapMenuMark!.$2.left - 30)
                   .clamp(8.0, MediaQuery.of(context).size.width - 260),
-              top: (_tapMenuMark!.$2.top - 70).clamp(96.0, double.infinity),
+              top: _tapMenuMark!.$2.top - 70 >= 4
+                  ? _tapMenuMark!.$2.top - 70
+                  : _tapMenuMark!.$2.bottom + 12,
               child: markToolbar([
-                ('复制', () {
-                  Clipboard.setData(ClipboardData(text: _tapMenuMark!.$1.text));
-                  setState(() => _tapMenuMark = null);
-                }),
                 ('删除', () {
                   final mk = _tapMenuMark!.$1;
                   setState(() => _tapMenuMark = null);
                   _deleteMark(mk);
-                }),
+                }, Colors.redAccent),
+                ('复制', () {
+                  Clipboard.setData(ClipboardData(text: _tapMenuMark!.$1.text));
+                  setState(() => _tapMenuMark = null);
+                }, iosBlue),
               ]),
             ),
         ]);
