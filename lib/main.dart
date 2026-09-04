@@ -418,8 +418,10 @@ Future<List<String>> extractEpubHtml(String path) async {
     }
     return out;
   }
-  // 图片：解到缓存目录，src 改写为 file:// 绝对路径（fwfh core 原生渲染 file: 图片）
-  final imgDir = Directory.systemTemp.createTempSync('hmd_epub');
+  // 图片：解到固定缓存目录（打开新书先清空旧的——单本阅读场景，杜绝目录无限堆积）
+  final imgDir = Directory('${Directory.systemTemp.path}/hmd_epub');
+  if (imgDir.existsSync()) imgDir.deleteSync(recursive: true);
+  imgDir.createSync();
   final imgFiles = <String, String>{}; // zip 内路径 → 缓存绝对路径
   for (final f in zip) {
     final ext = f.name.toLowerCase().split('.').last;
@@ -510,6 +512,22 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!await f.exists()) return _toast('无法访问该文件');
     final name = safeName(f.uri.pathSegments.isNotEmpty ? f.uri.pathSegments.last : '未命名.md');
     final dst = File('${(await docsDir()).path}${Platform.pathSeparator}$name');
+    // 同名覆盖会顶掉旧副本，且旧标注将锚到新内容上错位——须用户确认
+    if (dst.existsSync() && _recent.any((x) => x.name == name)) {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('替换同名文件？'),
+          content: Text('已有「$name」的记录，替换后内容更新，但旧标注可能因位置变化而错位。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('替换')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
     try {
       await f.copy(dst.path);
     } catch (_) {
@@ -539,13 +557,36 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // 删除单条记录：连同应用内文件副本与该文件的标注一起清理
+  // 左滑删除：先只移列表，6 秒撤销窗口过后才真正删文件副本与标注——误滑可挽回
+  Future<void> _removeWithUndo(RecentRec r) async {
+    final messenger = ScaffoldMessenger.of(context); // async 前先取
+    setState(() => _recent.removeWhere((x) => x.name == r.name));
+    await saveRecent(_recent);
+    if (!mounted) return;
+    messenger.showSnackBar(SnackBar(
+      content: Text('已删除「${r.name}」'),
+      duration: const Duration(seconds: 5),
+      action: SnackBarAction(
+        label: '撤销',
+        onPressed: () {
+          setState(() => _recent.insert(0, r));
+          saveRecent(_recent);
+        },
+      ),
+    ));
+    await Future.delayed(const Duration(seconds: 6));
+    // 撤销窗口结束仍未恢复 → 真正清理（连 pos_ 一起）
+    if (!mounted || _recent.any((x) => x.name == r.name)) return;
+    await _purgeFiles([r.name], alsoPos: true);
+  }
+
   Future<void> _removeRec(RecentRec r) async {
     setState(() => _recent.removeWhere((x) => x.name == r.name));
     await saveRecent(_recent);
-    await _purgeFiles([r.name]);
+    await _purgeFiles([r.name], alsoPos: true);
   }
 
-  Future<void> _purgeFiles(List<String> names) async {
+  Future<void> _purgeFiles(List<String> names, {bool alsoPos = false}) async {
     final dir = (await docsDir()).path;
     for (final n in names) {
       try {
@@ -554,6 +595,11 @@ class _HomeScreenState extends State<HomeScreen> {
       try {
         await prefs.remove('marks_$n');
       } catch (_) {}
+      if (alsoPos) {
+        try {
+          await prefs.remove('pos_$n');
+        } catch (_) {}
+      }
     }
   }
 
@@ -591,7 +637,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final names = [for (final r in _recent) r.name];
     setState(() => _recent.clear());
     await saveRecent(_recent);
-    await _purgeFiles(names);
+    await _purgeFiles(names, alsoPos: true);
     _toast('已清空');
   }
 
@@ -698,7 +744,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: Colors.redAccent,
           child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 26),
         ),
-        onDismissed: (_) => _removeRec(r),
+        onDismissed: (_) => _removeWithUndo(r),
         child: InkWell(
           onTap: () => _open(r),
           onLongPress: () => _confirmRemove(r),
@@ -781,6 +827,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Offset? _toastPos; // "已复制"浮条位置（手指处）
   Timer? _toastTimer;
   (Mark, Rect)? _tapMenuMark; // 点击标注弹出的工具条（mark + 锚矩形）
+  List<String>? _blocksCache; // splitBlocks 结果缓存（内容未变时复用）
+  String? _blocksCacheSrc;
   Timer? _posTimer; // 阅读位置防抖保存
   int _pdfPage = 1; // pdf 当前页（位置记忆）
   bool _pdfRestored = false; // onPageChanged 首次回调时恢复一次
@@ -877,6 +925,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
         if (o > 0 && ctrl.hasClients) {
           ctrl.jumpTo(o.clamp(0.0, ctrl.position.maxScrollExtent));
         }
+        // 块锚点校准：jump 后目标块已构建，ensureVisible 落到块顶（字号改过也不漂）
+        final b = (j['b'] as num?)?.toInt();
+        if (b != null) {
+          Future.delayed(const Duration(milliseconds: 150), () {
+            if (!mounted) return;
+            final ctx = (_kind == DocKind.epub ? _chapterKeys : _blockKeys)[b]?.currentContext;
+            if (ctx != null && ctx.mounted) {
+              Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 200), alignment: 0);
+            }
+          });
+        }
       });
     } catch (_) {}
   }
@@ -919,7 +978,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
     if (_kind == DocKind.pdf) return; // pdf 走 _addPdfMark
     // md：按块拆段——跨段选区每块一条、共用 id（删除时整组一起删）
-    final blocks = splitBlocks(src);
+    final blocks = _blocksOf(src);
     final offs = <int>[0];
     for (final blk in blocks) {
       offs.add(offs.last + blk.length);
@@ -1009,6 +1068,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
   // ---- 标注矩形系统：定位/绘制/点击命中全部基于同一套实测矩形 ----
   // 正文不注入任何标注样式（排版恒定）；渲染后测量每条标注文字的精确屏幕矩形：
   // 高亮=矩形画色块、划线=矩形画波浪，同文字多标注自然叠加互不冲突。
+  List<String> _blocksOf(String src) {
+    if (_blocksCache == null || _blocksCacheSrc != src) {
+      _blocksCacheSrc = src;
+      _blocksCache = splitBlocks(src);
+    }
+    return _blocksCache!;
+  }
+
   void _scheduleMeasure() {
     if (_measureScheduled || !mounted) return;
     _measureScheduled = true;
@@ -1150,7 +1217,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   ({String text, int off, String ctx})? _anchorCtx(String t, Offset? press) {
     final isEpub = _kind == DocKind.epub;
     final src = isEpub ? (_html?.join('\n') ?? '') : (_content ?? '');
-    final blocks = isEpub ? (_html ?? const <String>[]) : splitBlocks(src);
+    final blocks = isEpub ? (_html ?? const <String>[]) : _blocksOf(src);
     String around(int i) => src.substring((i - 16).clamp(0, src.length), i) +
         src.substring(i, i + t.length) +
         src.substring((i + t.length).clamp(0, src.length),
@@ -1226,7 +1293,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
     if (_kind != DocKind.md || _content == null) return const [];
     final out = <(int, String, int)>[];
-    for (final (bi, blk) in splitBlocks(_content!).indexed) {
+    for (final (bi, blk) in _blocksOf(_content!).indexed) {
       for (final m in RegExp(r'^(#{1,6})\s+(.+)$', multiLine: true).allMatches(blk)) {
         out.add((m.group(1)!.length, m.group(2)!.trim(), bi));
       }
@@ -1239,7 +1306,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final ol = _outline();
     if (idx < 0 || idx >= ol.length) return;
     final ctrl = _kind == DocKind.epub ? _epubScroll : _mdScroll;
-    final total = _kind == DocKind.epub ? _html!.length : splitBlocks(_content!).length;
+    final total = _kind == DocKind.epub ? _html!.length : _blocksOf(_content!).length;
     final ratio = (ol[idx].$3 + 1) / total;
     if (ctrl.hasClients) {
       ctrl.jumpTo((ctrl.position.maxScrollExtent * ratio).clamp(0.0, ctrl.position.maxScrollExtent));
@@ -1323,9 +1390,20 @@ class _ReaderScreenState extends State<ReaderScreen> {
       return;
     }
     final ctrl = _kind == DocKind.epub ? _epubScroll : _mdScroll;
-    if (ctrl.hasClients) {
-      prefs.setString('pos_${widget.title}', '{"o":${ctrl.offset.round()}}');
-    }
+    if (!ctrl.hasClients) return;
+    // 顶部块号：字号改变后 offset 会漂移，块锚点保证仍回到同一块
+    final keys = _kind == DocKind.epub ? _chapterKeys : _blockKeys;
+    int? topBi;
+    double bestDy = -1;
+    keys.forEach((bi, k) {
+      final ro = k.currentContext?.findRenderObject();
+      if (ro is RenderBox) {
+        final dy = ro.localToGlobal(Offset.zero).dy;
+        if (dy <= 300 && dy >= bestDy) { bestDy = dy; topBi = bi; }
+      }
+    });
+    prefs.setString('pos_${widget.title}',
+        '{"o":${ctrl.offset.round()}${topBi != null ? ',"b":$topBi' : ''}}');
   }
 
   void _onScrolled() {
@@ -1390,10 +1468,28 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   int get _searchTotal => _kind == DocKind.epub ? _searchHitChapters.length : _searchHitBlocks.length;
 
+  // 命中序号表在输入时同步算好：AppBar 计数与正文高亮同帧一致
+  // （曾放在 build 里算——AppBar 先于 body 构建，计数永远滞后一拍）
+  void _recomputeSearchHits() {
+    if (_kind == DocKind.epub) {
+      _searchHitChapters.clear();
+      for (var i = 0; i < (_html?.length ?? 0); i++) {
+        _searchHitChapters.addAll(
+            [for (var j = 0; j < findMatches(_html![i], _query).length; j++) i]);
+      }
+    } else if (_content != null) {
+      _searchHitBlocks.clear();
+      for (final (bi, raw) in _blocksOf(_content!).indexed) {
+        _searchHitBlocks.addAll([for (var i = 0; i < findMatches(raw, _query).length; i++) bi]);
+      }
+    }
+  }
+
   void _onQueryChanged(String v) {
     setState(() {
       _query = v;
       _searchIdx = 0;
+      _recomputeSearchHits();
     });
     if (_kind == DocKind.pdf) {
       _pdfSearcher ??= PdfTextSearcher(_pdfCtrl);
@@ -1706,12 +1802,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
         ]);
       case DocKind.epub:
         if (_html == null) return loading;
-        // 命中需预计算：ListView.builder 惰性构建，滚到的章节才会 build
-        _searchHitChapters.clear();
-        for (var i = 0; i < _html!.length; i++) {
-          _searchHitChapters.addAll(
-              [for (var j = 0; j < findMatches(_html![i], _query).length; j++) i]);
-        }
         // epub 选择标注：HtmlWidget 内部 Text 纳入 SelectionArea 选择域（同 md 方案）
         return ValueListenableBuilder<double>(
           valueListenable: appFont,
@@ -1790,8 +1880,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
             child: ValueListenableBuilder<double>(
           valueListenable: appFont,
           builder: (_, fs, _) {
-            final blocks = splitBlocks(_content!);
-            _searchHitBlocks.clear();
+            final blocks = _blocksOf(_content!);
             final children = <Widget>[];
             for (final (bi, raw) in blocks.indexed) {
               // 标注不再注入正文（视觉由矩形层绘制，定位零冲突）；仅搜索命中注入橙色 token。
@@ -1801,7 +1890,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
               for (final (s, e) in hits.reversed) {
                 data = data.replaceRange(s, e, '⟦s⟧${data.substring(s, e)}⟦/s⟧');
               }
-              _searchHitBlocks.addAll([for (var j = 0; j < hits.length; j++) bi]);
               _blockKeys[bi] ??= GlobalKey();
               // MarkdownBody 无内部滚动视图；用滚动版 Markdown 会与外层 ListView 抢手势导致无法滚动。
               // selectable:false 走 Text.rich——自动纳入外层 SelectionArea，跨段落选择可用
@@ -2037,7 +2125,10 @@ class _MarksPanelState extends State<MarksPanel> {
                   onSelected: (_) => setState(() => _filter = i),
                   labelStyle: TextStyle(
                       fontSize: 14,
-                      color: _filter == i ? Colors.white : Theme.of(context).colorScheme.onSurface),
+                      // 黄底必须配深字（白字在黄底上不可读）；蓝底配白字
+                      color: _filter == i
+                          ? (i == 1 ? Colors.black87 : Colors.white)
+                          : Theme.of(context).colorScheme.onSurface),
                   selectedColor: _filter == 1 ? hlYellow : iosBlue,
                   showCheckmark: false,
                 ),

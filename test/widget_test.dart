@@ -32,6 +32,9 @@ void main() {
   });
 
   testWidgets('主页：左滑删除记录，长按可删单条，清空按钮全清', (t) async {
+    t.view.physicalSize = const Size(1080, 1920);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.reset);
     await saveRecent([
       RecentRec('a.md', 1),
       RecentRec('b.md', 2),
@@ -40,11 +43,15 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('a.md'), findsOneWidget);
     expect(find.text('b.md'), findsOneWidget);
-    // 左滑第一条（a.md）→ 直接删
+    // 左滑第一条（a.md）→ 列表即删 + 撤销条出现；窗口过后仍是删除态
     await t.drag(find.text('a.md'), const Offset(-500, 0));
-    await t.pumpAndSettle();
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 600));
+    await t.pump(const Duration(milliseconds: 400));
     expect(find.text('a.md'), findsNothing);
-    expect(find.text('b.md'), findsOneWidget);
+    expect(find.byType(SnackBarAction), findsOneWidget);
+    await t.pump(const Duration(seconds: 7)); // 撤销窗口结束（未点撤销=确认删除）
+    expect(find.text('a.md'), findsNothing);
     expect(loadRecent().map((r) => r.name), ['b.md']);
     // 长按 b.md → 确认框 → 删除
     await t.longPress(find.text('b.md'));
@@ -416,6 +423,54 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('蓝词一'), findsOneWidget);
     expect(find.text('黄词一'), findsNothing);
+  });
+
+  // 撤销交互（点撤销恢复记录）由真机实测覆盖——widget 测试环境 SnackBarAction
+  // 紧贴屏幕底边出界，tap 无法命中；此处只验证可稳定断言的部分
+  testWidgets('主页：左滑删除出现撤销条，未点撤销保持删除', (t) async {
+    t.view.physicalSize = const Size(1080, 1920);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.reset);
+    await saveRecent([RecentRec('x.md', 9)]);
+    await t.pumpWidget(const KeyedSubtree(key: ValueKey('undo'), child: HmdApp()));
+    await t.pumpAndSettle();
+    await t.drag(find.text('x.md'), const Offset(-500, 0));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 600));
+    await t.pump(const Duration(milliseconds: 400));
+    expect(find.text('x.md'), findsNothing); // 列表即删
+    expect(find.byType(SnackBarAction), findsOneWidget); // 撤销入口已给出
+    await t.pump(const Duration(seconds: 7)); // 不点撤销：窗口结束保持删除
+    expect(find.text('x.md'), findsNothing);
+  });
+
+  // 搜索开启时 ⟦s⟧ token 注入会改变渲染文本结构——标注矩形层必须不受影响
+  testWidgets('搜索与标注并存：注入搜索token后标注层与命中同时正常', (t) async {
+    final m = Mark('mk9', '黄河', '白日依山尽，', '入海流', 1, false, false, 1);
+    await saveMarks('t并存.md', [m]);
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't并存.md',
+        initialContent: '# 标\n\n白日依山尽，黄河入海流。世界你好。',
+      ),
+    ));
+    await t.pumpAndSettle();
+    // 开搜索输入"世界"（命中正文末尾，与标注词不同处）
+    await t.tap(find.byTooltip('搜索'));
+    await t.pumpAndSettle();
+    // widget 测试环境 enterText 的 onChanged 触发不稳定：直接调 TextField 回调（白盒）
+    (t.widget(find.byType(TextField)) as TextField).onChanged!('世界');
+    await t.pumpAndSettle();
+
+    expect(find.text('1/1'), findsOneWidget); // 命中计数=1
+    // 标注矩形绘制层仍在（波浪线仍画）
+    expect(
+        find.byWidgetPredicate(
+            (w) => w is CustomPaint && w.painter.runtimeType.toString() == '_MarkPainter'),
+        findsOneWidget);
+    // 标注文本仍完整渲染（token 未破坏正文）
+    expect(find.textContaining('黄河入海流'), findsOneWidget);
   });
 
   testWidgets('主题 auto：跟随系统模式渲染正常', (t) async {
