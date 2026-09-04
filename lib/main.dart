@@ -47,7 +47,7 @@ Future<void> initPrefs() async {
   prefs = await SharedPreferences.getInstance();
   appFont.value = prefs.getDouble('fontSize') ?? 18;
   final t = prefs.getString('theme');
-  if (t != null && themes.containsKey(t)) {
+  if (t != null && (t == 'auto' || themes.containsKey(t))) {
     appTheme.value = t;
   } else {
     appTheme.value = prefs.getBool('dark') == true ? 'dark' : 'light'; // 旧版 bool 迁移
@@ -66,7 +66,7 @@ class HmdApp extends StatelessWidget {
   static ThemeData theme(String key) {
     final (bg, card, fg) = themes[key]!;
     final dark = key == 'dark';
-    return ThemeData(
+    var t = ThemeData(
       useMaterial3: true,
       brightness: dark ? Brightness.dark : Brightness.light,
       colorScheme: ColorScheme.fromSeed(seedColor: iosBlue, brightness: dark ? Brightness.dark : Brightness.light)
@@ -80,6 +80,14 @@ class HmdApp extends StatelessWidget {
         centerTitle: true,
       ),
     );
+    if (dark) {
+      // 黑底纯白字刺眼：文字亮度降到 90%
+      t = t.copyWith(
+          textTheme: t.textTheme.apply(
+              bodyColor: const Color(0xE6FFFFFF),
+              displayColor: const Color(0xE6FFFFFF)));
+    }
+    return t;
   }
 
   @override
@@ -89,8 +97,13 @@ class HmdApp extends StatelessWidget {
       builder: (_, key, _) => MaterialApp(
         title: 'MD+',
         theme: theme('light'),
-        darkTheme: theme(key == 'light' ? 'dark' : key),
-        themeMode: key == 'light' ? ThemeMode.light : ThemeMode.dark,
+        darkTheme: theme(key == 'light' || key == 'auto' ? 'dark' : key),
+        // auto：亮=light 暗=dark，跟随系统即时切换；四色护眼仍为手动固定
+        themeMode: switch (key) {
+          'auto' => ThemeMode.system,
+          'light' => ThemeMode.light,
+          _ => ThemeMode.dark,
+        },
         home: const HomeScreen(),
       ),
     );
@@ -334,6 +347,17 @@ Future<String> extractDocxText(String path) async {
 // ponytail: 自写 EPUB 解析（zip + container.xml + opf 的 manifest/spine），
 // 只取 spine 顺序的 xhtml 章节。不引 epubx 是因为它钉死 image 3.x，与 pdfrx 的
 // image 4.x 冲突。加密/DRM 的 epub 不支持；升级路径是接入 epubx 修复版或自写完整 OPF 解析。
+// 章名：优先 <title>，退化首个 h1-h3 文本，再退化空串（UI 显示"第 n 章"）
+String epubChapterTitle(String html, int idx) {
+  final t = RegExp(r'<title[^>]*>(.*?)</title>', dotAll: true).firstMatch(html)?.group(1);
+  var name = t?.trim() ?? '';
+  if (name.isEmpty) {
+    final h = RegExp(r'<h[1-3][^>]*>(.*?)</h[1-3]>', dotAll: true).firstMatch(html)?.group(1);
+    name = (h ?? '').replaceAll(RegExp(r'<[^>]+>'), '').trim();
+  }
+  return name;
+}
+
 Future<List<String>> extractEpubHtml(String path) async {
   final zip = ZipDecoder().decodeBytes(await File(path).readAsBytes());
   final files = {for (final f in zip) f.name: f};
@@ -394,11 +418,42 @@ Future<List<String>> extractEpubHtml(String path) async {
     }
     return out;
   }
+  // 图片：解到缓存目录，src 改写为 file:// 绝对路径（fwfh core 原生渲染 file: 图片）
+  final imgDir = Directory.systemTemp.createTempSync('hmd_epub');
+  final imgFiles = <String, String>{}; // zip 内路径 → 缓存绝对路径
+  for (final f in zip) {
+    final ext = f.name.toLowerCase().split('.').last;
+    if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) continue;
+    final dst = File('${imgDir.path}/${imgFiles.length}.$ext');
+    dst.writeAsBytesSync(f.content as List<int>);
+    imgFiles[f.name] = dst.path;
+  }
+  String rewrite(String html, String chapterPath) {
+    return html.replaceAllMapped(RegExp(r'src="([^"]+)"'), (m) {
+      var src = m.group(1)!;
+      if (src.startsWith('data:') || src.startsWith('http') || src.startsWith('file:')) {
+        return m.group(0)!; // 内嵌/远程不动
+      }
+      // 相对路径 → 相对章目录规范化 → 命中缓存图则改写
+      var full = chapterPath.contains('/')
+          ? '${chapterPath.substring(0, chapterPath.lastIndexOf('/') + 1)}$src'
+          : src;
+      full = full.replaceAll('./', '');
+      while (full.startsWith('../')) {
+        full = full.substring(3);
+      }
+      final hit = imgFiles[full] ?? imgFiles[src];
+      // Windows 缓存路径的反斜杠转 URI 斜杠；未命中缓存的 src 原样保留
+      if (hit == null) return m.group(0)!;
+      final url = 'file:///${hit.replaceAll('\\', '/')}';
+      return 'src="$url"';
+    });
+  }
   for (final href in order) {
     final f = resolve(href);
     if (f == null) continue;
     final c = utf8.decode(files[f]!.content as List<int>);
-    if (c.trim().isNotEmpty) out.add(c);
+    if (c.trim().isNotEmpty) out.add(rewrite(c, f));
   }
   return out;
 }
@@ -720,14 +775,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
   // 用 ValueNotifier 只触发 CustomPaint 重绘，避免 setState 循环
   final _rectNotifier = ValueNotifier<List<(Mark, Rect)>>(const []);
   final _mdScroll = ScrollController();
+  final _epubScroll = ScrollController();
   bool _measureScheduled = false;
   Offset? _lastTapDown;
+  Offset? _toastPos; // "已复制"浮条位置（手指处）
+  Timer? _toastTimer;
   (Mark, Rect)? _tapMenuMark; // 点击标注弹出的工具条（mark + 锚矩形）
+  Timer? _posTimer; // 阅读位置防抖保存
+  int _pdfPage = 1; // pdf 当前页（位置记忆）
+  bool _pdfRestored = false; // onPageChanged 首次回调时恢复一次
   String? _selCtx; // 选中处前后 16 字上下文（真实位置锚定，防同词首现错位）
+  int? _selOff; // 选中处精确偏移（SelectionArea 不给区间，几何锚定推得；ctx 反查会撞前文同词）
   // 选词工具条定位：直接用长按的按点（必在选中词上）——测量选区矩形曾反复错位，
   // 按点方案零测量、零坐标系换算歧义（top 需减 body Stack 原点）
   Offset? _selPoint;
-  int _mdEpoch = 0; // 递增以强制重建 MarkdownBody，从而清除系统选区
+  // 全文档选择域：跨段落选词（SelectableText 方案下每段是选择孤岛，选不过段）
+  final _selAreaKey = GlobalKey<SelectionAreaState>();
+  final _epubSelKey = GlobalKey<SelectionAreaState>(); // epub 章节列表的选择域
+  final _epubStackKey = GlobalKey(); // epub 选词工具条定位基准
   final _stackKey = GlobalKey(); // body Stack：矩形局部坐标系的基准
   Offset _stackOrigin = Offset.zero;
 
@@ -738,6 +803,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
     super.initState();
     _marks = loadMarks(widget.title);
     _mdScroll.addListener(_scheduleMeasure);
+    // 滚动即关弹出框（选词工具条 / 点击标注菜单）
+    _mdScroll.addListener(_onScrolled);
+    _epubScroll.addListener(_onScrolled);
     if (widget.initialContent != null) {
       _content = widget.initialContent;
     } else {
@@ -747,8 +815,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   void dispose() {
+    _savePos(); // 退出阅读时记住位置
+    _posTimer?.cancel();
     _searchCtrl.dispose();
     _mdScroll.dispose();
+    _epubScroll.dispose();
+    _toastTimer?.cancel();
     _rectNotifier.dispose();
     _pdfSearcher?.dispose();
     super.dispose();
@@ -783,6 +855,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _error = '打开失败：文件可能已损坏或格式不受支持';
     }
     if (mounted) setState(() {});
+    _restorePos();
+  }
+
+  // 重开文件回到上次位置：md/epub 按像素偏移直接跳（字号未变即精确；
+  // ponytail: 字号变了会漂移，升级路径=块级锚点定位）
+  void _restorePos() {
+    if (!mounted) return;
+    try {
+      final j = jsonDecode(prefs.getString('pos_${widget.title}') ?? '');
+      if (j is! Map) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_kind == DocKind.pdf) {
+          final pg = (j['p'] as num?)?.toInt() ?? 1;
+          if (pg > 1) _pdfCtrl.goToPage(pageNumber: pg);
+          return;
+        }
+        final ctrl = _kind == DocKind.epub ? _epubScroll : _mdScroll;
+        final o = (j['o'] as num?)?.toDouble() ?? 0;
+        if (o > 0 && ctrl.hasClients) {
+          ctrl.jumpTo(o.clamp(0.0, ctrl.position.maxScrollExtent));
+        }
+      });
+    } catch (_) {}
   }
 
   void _setFont(double v) {
@@ -793,39 +889,73 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   // ---- 标注 ----
 
-  Future<void> _addMark(String text, bool hl, [String? selCtx]) async {
+  Future<void> _addMark(String text, bool hl, [String? selCtx, int? selOff]) async {
     text = text.trim();
     if (text.isEmpty || text.length > 500) return;
     final src = _kind == DocKind.epub ? _html!.join('\n') : (_content ?? '');
     var i = src.indexOf(text);
-    // 优先用选中处的直接上下文定位：同词在全文多处出现时，全文首现会标错位置
-    if (selCtx != null && selCtx.contains(text)) {
+    // 精确偏移优先（几何锚定推得，文本已与源文对齐不 trim）；否则退回上下文定位：同词多处时全文首现会标错位置
+    if (selOff != null && selOff >= 0 && selOff + text.length <= src.length) {
+      i = selOff;
+    } else if (selCtx != null && selCtx.contains(text)) {
       final ci = src.indexOf(selCtx);
       if (ci >= 0) i = ci + selCtx.indexOf(text);
     }
     if (i < 0) return;
-    // 锚点截到同一行内：跨段的上下文会让渲染时的段内匹配失败
-    final lineStart = i > 0 ? src.lastIndexOf('\n', i - 1) + 1 : 0;
-    final lineEnd = src.indexOf('\n', i + text.length);
-    final b = src.substring((i - 16).clamp(lineStart, src.length), i);
-    final e = (i + text.length + 16).clamp(0, lineEnd < 0 ? src.length : lineEnd);
-    final a = src.substring(i + text.length, e);
-    var page = 0;
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final now = DateTime.now().millisecondsSinceEpoch;
     if (_kind == DocKind.epub) {
-      page = _html!.indexWhere((h) => h.contains(b + text) || h.contains(text));
-      if (page < 0) page = 0;
-    } else if (_kind != DocKind.pdf) {
-      // 记录所在块序号：渲染时只标这一块，避免同文多处全部被标
-      var off = 0;
-      for (final blk in splitBlocks(src)) {
-        if (i >= off && i < off + blk.length) break;
-        off += blk.length;
-        page++;
-      }
+      final lineStart = i > 0 ? src.lastIndexOf('\n', i - 1) + 1 : 0;
+      final lineEnd = src.indexOf('\n', i + text.length);
+      final b = src.substring((i - 16).clamp(lineStart, src.length), i);
+      final e = (i + text.length + 16).clamp(0, lineEnd < 0 ? src.length : lineEnd);
+      final page = _html!.indexWhere((h) => h.contains(b + text) || h.contains(text));
+      setState(() => _marks = [
+            ..._marks,
+            Mark(id, text, b, src.substring(i + text.length, e), now, hl, false, page < 0 ? 0 : page)
+          ]);
+      await saveMarks(widget.title, _marks);
+      return;
     }
-    final m = Mark(DateTime.now().microsecondsSinceEpoch.toString(), text, b, a,
-        DateTime.now().millisecondsSinceEpoch, hl, false, page);
-    setState(() => _marks = [..._marks, m]);
+    if (_kind == DocKind.pdf) return; // pdf 走 _addPdfMark
+    // md：按块拆段——跨段选区每块一条、共用 id（删除时整组一起删）
+    final blocks = splitBlocks(src);
+    final offs = <int>[0];
+    for (final blk in blocks) {
+      offs.add(offs.last + blk.length);
+    }
+    final end = i + text.length;
+    final segs = <(int, int, int)>[]; // (块号, 起, 止)
+    var bi = 0;
+    var s = i;
+    while (s < end) {
+      while (bi + 1 < blocks.length && s >= offs[bi + 1]) {
+        bi++;
+      }
+      final bend = end < offs[bi + 1] ? end : offs[bi + 1];
+      segs.add((bi, s, bend));
+      s = bend;
+    }
+    final segMarks = <Mark>[];
+    for (final (pb, ss, se) in segs) {
+      final segText = src.substring(ss, se).trim();
+      if (segText.isEmpty) continue;
+      // 前后文截到同一行内：跨段的上下文会让渲染时的段内匹配失败
+      final lineStart = ss > 0 ? src.lastIndexOf('\n', ss - 1) + 1 : 0;
+      final lineEnd = src.indexOf('\n', se);
+      final le = lineEnd < 0 ? src.length : lineEnd;
+      segMarks.add(Mark(
+          id,
+          segText,
+          src.substring((ss - 16).clamp(lineStart, ss), ss),
+          src.substring(se, (se + 16).clamp(0, le)),
+          now,
+          hl,
+          false,
+          pb));
+    }
+    if (segMarks.isEmpty) return;
+    setState(() => _marks = [..._marks, ...segMarks]);
     await saveMarks(widget.title, _marks);
   }
 
@@ -945,16 +1075,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
     return true;
   }
 
-  // 选词菜单动作：标注 + 清选区（重建 MarkdownBody）+ 收工具条
+  // 选词菜单动作：标注 + 清选区 + 收工具条
   void _markFromSelection(bool hl) {
     final t = _mdSelText;
     final ctx = _selCtx; // 真实选中处的前后文，杜绝同词在前文出现时标错位置
     setState(() {
       _mdSelText = '';
       _selPoint = null;
-      _mdEpoch++; // 重建清空系统选区
     });
-    _addMark(t, hl, ctx);
+    _clearSysSelection(); // 清系统选区（替代重建 MarkdownBody）
+    _addMark(t, hl, ctx, _selOff);
   }
 
   // 点击已标注文字：弹与选词菜单同款的工具条（复制/删除）
@@ -979,31 +1109,236 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _tapMenuMark = (m, anchor);
       _mdSelText = '';
       _selCtx = null;
+      _selOff = null;
       _selPoint = null;
     });
   }
 
-  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText  // md 选择：flutter_markdown 的 selectable 内部用 SelectableText（与滚动协调正常），
-  // 选中文本经 onSelectionChanged 直接回调，不依赖系统剪贴板（真机管控下不可靠）。
-  void _onMdSelection(String? text, TextSelection selection, SelectionChangedCause? cause) {
-    final t = selectedOf(text, selection);
-    // 先更新选中处前后 16 字上下文与精确偏移（同词在不同位置重选时 t 相同但 ctx 不同，不能提前 return）
-    if (t.isNotEmpty && text != null && !selection.isCollapsed) {
-      final b = (selection.start - 16).clamp(0, text.length);
-      final e = (selection.end + 16).clamp(0, text.length);
-      _selCtx = text.substring(b, selection.start) + t + text.substring(selection.end, e);
-      if (_lastTapDown != null) _selPoint = _lastTapDown; // 按点即词上
-    } else {
-      _selCtx = null;
-      _selPoint = null;
-    }
+  // md 选择：全文档 SelectionArea（selectable:false 走 Text.rich，自动纳入选择域），
+  // 跨段落选择可用；选中文本经 onSelectionChanged 回调，不依赖系统剪贴板。
+  void _onDocSelection(SelectedContent? c) {
+    final t = c?.plainText ?? '';
     if (t == _mdSelText) return;
     if (mounted) {
       setState(() {
         _mdSelText = t;
-        if (t.isEmpty) _selPoint = null;
-        if (t.isNotEmpty) _tapMenuMark = null; // 新选区时关点击菜单（互斥）
+        if (t.isEmpty) {
+          _selPoint = null;
+          _selCtx = null;
+          _selOff = null;
+        } else {
+          if (_lastTapDown != null) _selPoint = _lastTapDown; // 按点即词上
+          final a = _anchorCtx(t, _lastTapDown);
+          if (a != null) {
+            _mdSelText = a.text; // 与源文对齐的选区文本（跨段换行以源文为准，偏移才对得上）
+            _selCtx = a.ctx;
+            _selOff = a.off;
+          } else {
+            _selCtx = null;
+            _selOff = null;
+          }
+          _tapMenuMark = null; // 新选区时关点击菜单（互斥）
+        }
       });
+    }
+  }
+
+  // 选中处前后 16 字上下文；同词多处时按几何就近锚定真实选中处。
+  // SelectionArea 只回纯文本不给偏移，但长按按点必落在选区起始块内——
+  // 用候选出现处所在块的矩形中心 Y 与按点 Y 的距离取最近。
+  // ponytail: 块定位用线性扫（块数少），同段重复同词锚近侧；升级路径 = 二分/富文本 registrar。
+  ({String text, int off, String ctx})? _anchorCtx(String t, Offset? press) {
+    final isEpub = _kind == DocKind.epub;
+    final src = isEpub ? (_html?.join('\n') ?? '') : (_content ?? '');
+    final blocks = isEpub ? (_html ?? const <String>[]) : splitBlocks(src);
+    String around(int i) => src.substring((i - 16).clamp(0, src.length), i) +
+        src.substring(i, i + t.length) +
+        src.substring((i + t.length).clamp(0, src.length),
+            (i + t.length + 16).clamp(0, src.length));
+    var first = src.indexOf(t);
+    if (first < 0) {
+      // 跨段选区纯文本段间无分隔（或 \n），源文是 \n\n：逐字间按"零或多空白"弹性匹配
+      final m = RegExp(t.split('').map(RegExp.escape).join(r'\s*')).firstMatch(src);
+      if (m == null) return null;
+      first = m.start;
+      t = src.substring(first, m.end); // 对齐源文实际文本
+    }
+    if (press == null) return (text: t, off: first, ctx: around(first));
+    // 块偏移一次算好（曾放进候选循环里：单字高频时 946KB 全文反复切块，主线程 ANR）
+    final offs = <int>[0];
+    for (final b in blocks) {
+      offs.add(offs.last + b.length);
+    }
+    double dist(int j) {
+      var bi = 0;
+      while (bi + 1 < blocks.length && j >= offs[bi + 1]) {
+        bi++;
+      }
+      final ro = (isEpub ? _chapterKeys[bi] : _blockKeys[bi])?.currentContext?.findRenderObject();
+      if (ro is RenderBox) {
+        return (ro.localToGlobal(Offset.zero).dy + ro.size.height / 2 - press.dy).abs();
+      }
+      return double.infinity;
+    }
+    var best = first;
+    var bestD = dist(first);
+    var from = first + 1;
+    while (true) {
+      final j = src.indexOf(t, from);
+      if (j < 0) break;
+      final d = dist(j);
+      if (d < bestD) {
+        bestD = d;
+        best = j;
+      }
+      from = j + 1;
+    }
+    return (text: t, off: best, ctx: around(best));
+  }
+
+  // "已复制"提示：在手指按点上方浮出，1.1s 后消失
+  void _showCopied() {
+    final p = _lastTapDown;
+    if (p == null) return;
+    _toastTimer?.cancel();
+    setState(() => _toastPos = p);
+    _toastTimer = Timer(const Duration(milliseconds: 1100), () {
+      if (mounted) setState(() => _toastPos = null);
+    });
+  }
+
+  // 清系统选区（按格式选对应 SelectionArea）
+  void _clearSysSelection() {
+    (_kind == DocKind.epub ? _epubSelKey : _selAreaKey)
+        .currentState
+        ?.selectableRegion
+        .clearSelection();
+  }
+
+  // 滚动时清掉所有弹出态（选词工具条、点击标注菜单、残留选区）
+  // ---- 大纲导航：md=标题行(带块号) / epub=章节；pdf 引擎无书签 API 不提供 ----
+  List<(int, String, int)> _outline() {
+    if (_kind == DocKind.epub) {
+      return [
+        for (var i = 0; i < _html!.length; i++)
+          (1, epubChapterTitle(_html![i], i).isEmpty ? '第 ${i + 1} 章' : epubChapterTitle(_html![i], i), i)
+      ];
+    }
+    if (_kind != DocKind.md || _content == null) return const [];
+    final out = <(int, String, int)>[];
+    for (final (bi, blk) in splitBlocks(_content!).indexed) {
+      for (final m in RegExp(r'^(#{1,6})\s+(.+)$', multiLine: true).allMatches(blk)) {
+        out.add((m.group(1)!.length, m.group(2)!.trim(), bi));
+      }
+    }
+    return out;
+  }
+
+  // 大纲跳转：先按比例粗跳触发懒构建，再 ensureVisible 精确落位
+  Future<void> _jumpOutlineEntry(int idx) async {
+    final ol = _outline();
+    if (idx < 0 || idx >= ol.length) return;
+    final ctrl = _kind == DocKind.epub ? _epubScroll : _mdScroll;
+    final total = _kind == DocKind.epub ? _html!.length : splitBlocks(_content!).length;
+    final ratio = (ol[idx].$3 + 1) / total;
+    if (ctrl.hasClients) {
+      ctrl.jumpTo((ctrl.position.maxScrollExtent * ratio).clamp(0.0, ctrl.position.maxScrollExtent));
+    }
+    for (var i = 0; i < 3; i++) {
+      await Future.delayed(const Duration(milliseconds: 120));
+      if (!mounted) return;
+      final k = _kind == DocKind.epub ? _chapterKeys[ol[idx].$3] : _blockKeys[ol[idx].$3];
+      final ctx = k?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(ctx,
+            duration: const Duration(milliseconds: 250), alignment: 0);
+        return;
+      }
+      // 目标块未构建（太远）：向更远处再跳一步
+      if (ctrl.hasClients) {
+        ctrl.jumpTo(((ctrl.offset + ctrl.position.maxScrollExtent) / 2)
+            .clamp(0.0, ctrl.position.maxScrollExtent));
+      }
+    }
+  }
+
+  void _showOutline() {
+    final ol = _outline();
+    if (ol.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_kind == DocKind.pdf ? '此 PDF 无书签（引擎暂不支持）' : '此文档没有可导航的标题')));
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.62,
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Row(children: [
+              const Text('目录', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close, size: 22),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ]),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: ol.length,
+              itemBuilder: (_, i) => InkWell(
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _jumpOutlineEntry(i);
+                },
+                child: Padding(
+                  padding: EdgeInsets.only(left: 20.0 + (ol[i].$1 - 1) * 20, right: 20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: const BoxDecoration(
+                        border: Border(bottom: BorderSide(color: Colors.black12, width: 0.5))),
+                    child: Text(ol[i].$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: ol[i].$1 == 1 ? FontWeight.w600 : FontWeight.w400)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ---- 阅读位置记忆：滚动停止 600ms 后防抖保存（pdf 存页码） ----
+  void _savePos() {
+    if (_kind == DocKind.pdf) {
+      prefs.setString('pos_${widget.title}', '{"p":$_pdfPage}');
+      return;
+    }
+    final ctrl = _kind == DocKind.epub ? _epubScroll : _mdScroll;
+    if (ctrl.hasClients) {
+      prefs.setString('pos_${widget.title}', '{"o":${ctrl.offset.round()}}');
+    }
+  }
+
+  void _onScrolled() {
+    _posTimer?.cancel();
+    _posTimer = Timer(const Duration(milliseconds: 600), _savePos);
+    if (_mdSelText.isEmpty && _tapMenuMark == null) return;
+    if (mounted) {
+      setState(() {
+        _mdSelText = '';
+        _selPoint = null;
+        _tapMenuMark = null;
+      });
+      _clearSysSelection();
     }
   }
 
@@ -1105,6 +1440,29 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 spacing: 14,
                 runSpacing: 14,
                 children: [
+                  // 跟随系统：半亮半暗方块；亮时浅色、暗时深色
+                  InkWell(
+                    onTap: () {
+                      appTheme.value = 'auto';
+                      prefs.setString('theme', 'auto');
+                      Navigator.of(context).pop();
+                    },
+                    child: Container(
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                            color: appTheme.value == 'auto' ? iosBlue : Colors.transparent,
+                            width: 3),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(children: [
+                        Expanded(child: Container(color: lightBg)),
+                        Expanded(child: Container(color: Colors.black)),
+                      ]),
+                    ),
+                  ),
                   for (final e in themes.entries)
                     InkWell(
                       onTap: () {
@@ -1169,6 +1527,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.menu_book_outlined, size: 24),
+            tooltip: '目录',
+            onPressed: _showOutline,
+          ),
           IconButton(
             icon: const Icon(Icons.search, size: 24),
             tooltip: '搜索',
@@ -1300,6 +1663,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   if (mounted) setState(() => _pdfSel = s.hasSelectedText);
                 },
               ),
+              // pdfrx 2.4.5 无 onLoaded/书签 API：页码回调首次触发时恢复上次位置
+              onPageChanged: (page) {
+                _pdfPage = page ?? 1;
+                if (!_pdfRestored) {
+                  _pdfRestored = true;
+                  try {
+                    final j = jsonDecode(prefs.getString('pos_${widget.title}') ?? '');
+                    final pg = ((j is Map) ? j['p'] : null) is num ? (j['p'] as num).toInt() : 1;
+                    if (pg > 1 && pg != page) _pdfCtrl.goToPage(pageNumber: pg);
+                  } catch (_) {}
+                }
+              },
             ),
           ),
           // 深色模式下压暗白纸页面，夜间阅读不刺眼
@@ -1337,24 +1712,62 @@ class _ReaderScreenState extends State<ReaderScreen> {
           _searchHitChapters.addAll(
               [for (var j = 0; j < findMatches(_html![i], _query).length; j++) i]);
         }
-        // epub 不做选择标注（HtmlWidget 无内建选择；外挂 SelectionArea 会与滚动冲突）
+        // epub 选择标注：HtmlWidget 内部 Text 纳入 SelectionArea 选择域（同 md 方案）
         return ValueListenableBuilder<double>(
           valueListenable: appFont,
-          builder: (_, fs, _) => ListView.builder(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-            itemCount: _html!.length,
-            itemBuilder: (_, i) {
-              final k = _chapterKeys.putIfAbsent(i, GlobalKey.new);
-              var injected = injectHtmlMarks(
-                  _html![i], _marks.where((m) => !m.isPdf && m.page == i));
-              injected = injectHtmlSearch(injected, _query);
-              return Padding(
-                key: k,
-                padding: const EdgeInsets.only(bottom: 16),
-                child: HtmlWidget(injected, textStyle: TextStyle(fontSize: fs, height: 1.7)),
-              );
-            },
-          ),
+          builder: (_, fs, _) => Stack(key: _epubStackKey, children: [
+            RawScrollbar(
+              controller: _epubScroll,
+              interactive: true,
+              thumbVisibility: false,
+              timeToFade: const Duration(milliseconds: 1200),
+              thickness: 10,
+              radius: const Radius.circular(5),
+              minThumbLength: 72,
+              child: SelectionArea(
+                key: _epubSelKey,
+                onSelectionChanged: _onDocSelection,
+                contextMenuBuilder: (_, _) => const SizedBox.shrink(), // 不出系统菜单
+                magnifierConfiguration: TextMagnifierConfiguration.disabled, // 不出系统放大镜
+                child: ListView.builder(
+                  controller: _epubScroll,
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  itemCount: _html!.length,
+                  itemBuilder: (_, i) {
+                    final k = _chapterKeys.putIfAbsent(i, GlobalKey.new);
+                    var injected = injectHtmlMarks(
+                        _html![i], _marks.where((m) => !m.isPdf && m.page == i));
+                    injected = injectHtmlSearch(injected, _query);
+                    return Padding(
+                      key: k,
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: HtmlWidget(injected,
+                        textStyle: TextStyle(fontSize: fs, height: 1.7),
+                        factoryBuilder: _FitImageFactory.new),
+                    );
+                  },
+                ),
+              ),
+            ),
+            // 选词工具条（与 md 同款）：按点上方
+            if (_mdSelText.isNotEmpty && _selPoint != null)
+              Builder(builder: (bc) {
+                final ro = _epubStackKey.currentContext?.findRenderObject();
+                final so = ro is RenderBox ? ro.localToGlobal(Offset.zero) : Offset.zero;
+                final w = MediaQuery.of(bc).size.width;
+                return Positioned(
+                  left: (_selPoint!.dx - so.dx - 40).clamp(8.0, w - 250),
+                  top: () {
+                    final rel = _selPoint!.dy - so.dy;
+                    return rel - 96 >= 4 ? rel - 96 : 4.0;
+                  }(),
+                  child: markToolbar([
+                    ('划线', () => _markFromSelection(false), iosBlue),
+                    ('高亮', () => _markFromSelection(true), hlYellow),
+                  ]),
+                );
+              }),
+          ]),
         );
       default: // md / txt / docx
         if (_content == null) return loading;
@@ -1390,7 +1803,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
               }
               _searchHitBlocks.addAll([for (var j = 0; j < hits.length; j++) bi]);
               _blockKeys[bi] ??= GlobalKey();
-              // MarkdownBody 无内部滚动视图；用滚动版 Markdown 会与外层 ListView 抢手势导致无法滚动
+              // MarkdownBody 无内部滚动视图；用滚动版 Markdown 会与外层 ListView 抢手势导致无法滚动。
+              // selectable:false 走 Text.rich——自动纳入外层 SelectionArea，跨段落选择可用
               final w = MarkdownBody(
                 data: data,
                 styleSheet: _mdStyle(context, fs),
@@ -1400,19 +1814,34 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   'hmdU': MarkBuilder('u'),
                   'hmdS': MarkBuilder('s'),
                 },
-                selectable: true,
-                onSelectionChanged: _onMdSelection,
-                key: ValueKey('md-$_mdEpoch'),
-                contextMenuBuilder: (_, _) => const SizedBox.shrink(),
+                selectable: false,
               );
               final bk = _blockKeys[bi];
               children.add(bk == null ? w : KeyedSubtree(key: bk, child: w));
               if (bi < blocks.length - 1) children.add(const SizedBox(height: 8));
             }
-            return ListView(
+            // 滚动条：滚动时出现、停后淡出，可拖动快速定位。
+            // 用 RawScrollbar：Material Scrollbar 写死 600ms 淡出，拇指窗口太短抓不住；
+            // 这里放宽到 1.2s 并加长拇指，真机/模拟器都好抓
+            return RawScrollbar(
               controller: _mdScroll,
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              children: children,
+              interactive: true,
+              thumbVisibility: false,
+              timeToFade: const Duration(milliseconds: 1200),
+              thickness: 10,
+              radius: const Radius.circular(5),
+              minThumbLength: 72,
+              child: SelectionArea(
+                key: _selAreaKey,
+                onSelectionChanged: _onDocSelection,
+                contextMenuBuilder: (_, _) => const SizedBox.shrink(), // 不出系统菜单
+                magnifierConfiguration: TextMagnifierConfiguration.disabled, // 不出系统放大镜
+                child: ListView(
+                  controller: _mdScroll,
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  children: children,
+                ),
+              ),
             );
           },
           ),
@@ -1422,11 +1851,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
             Positioned(
               left: (_selPoint!.dx - _stackOrigin.dx - 40)
                   .clamp(8.0, MediaQuery.of(context).size.width - 250),
-              // 按点必在词上：菜单放按点(=词)上方；上方空间不足就贴 Stack 顶
-              // （贴顶也必然在词上方——词就在第一屏上部时用户仍看到菜单在文字上方）
+              // 按点必在词上：菜单放按点(=词)上方；工具条高约48，留96间隙确保不压上一行字
+              // 上方空间不足就贴 Stack 顶（贴顶也必然在词上方）
               top: () {
                 final rel = _selPoint!.dy - _stackOrigin.dy;
-                return rel - 68 >= 4 ? rel - 68 : 4.0;
+                return rel - 96 >= 4 ? rel - 96 : 4.0;
               }(),
               child: markToolbar([
                 ('划线', () => _markFromSelection(false), iosBlue),
@@ -1449,9 +1878,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 }, Colors.redAccent),
                 ('复制', () {
                   Clipboard.setData(ClipboardData(text: _tapMenuMark!.$1.text));
+                  _showCopied();
                   setState(() => _tapMenuMark = null);
                 }, iosBlue),
               ]),
+            ),
+          // "已复制"浮条：手指按点上方
+          if (_toastPos != null)
+            Positioned(
+              left: (_toastPos!.dx - _stackOrigin.dx - 28)
+                  .clamp(8.0, MediaQuery.of(context).size.width - 110),
+              top: (_toastPos!.dy - _stackOrigin.dy - 56).clamp(4.0, 2000),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.75),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Text('已复制',
+                    style: TextStyle(color: Colors.white, fontSize: 14)),
+              ),
             ),
         ]);
     }
@@ -1516,6 +1961,19 @@ class _MarkPainter extends CustomPainter {
 
 // ---------- 标注面板（搜索 / 跳转 / 删除） ----------// ---------- 标注面板（搜索 / 跳转 / 删除） ----------
 
+// epub 图片工厂：超宽图缩到屏宽内（fwfh 默认按原始尺寸渲染会溢出）
+class _FitImageFactory extends WidgetFactory {
+  @override
+  Widget? buildImageWidget(BuildTree tree, ImageSource src) {
+    final w = super.buildImageWidget(tree, src);
+    if (w == null) return null;
+    return SizedBox(
+      width: double.infinity,
+      child: FittedBox(fit: BoxFit.scaleDown, child: w),
+    );
+  }
+}
+
 class MarksPanel extends StatefulWidget {
   final List<Mark> marks;
   final void Function(Mark) onJump;
@@ -1527,13 +1985,16 @@ class MarksPanel extends StatefulWidget {
 
 class _MarksPanelState extends State<MarksPanel> {
   String _q = '';
+  int _filter = 0; // 0=全部 1=高亮 2=划线
   late final List<Mark> _list = List.of(widget.marks);
 
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final card = dark ? darkCard : Colors.white;
-    final shown = _q.isEmpty ? _list : _list.where((m) => m.text.contains(_q)).toList();
+    var shown = _q.isEmpty ? _list : _list.where((m) => m.text.contains(_q)).toList();
+    if (_filter == 1) shown = shown.where((m) => m.isHighlight).toList();
+    if (_filter == 2) shown = shown.where((m) => !m.isHighlight).toList();
     return SizedBox(
       height: MediaQuery.of(context).size.height * 0.62,
       child: Column(children: [
@@ -1563,6 +2024,25 @@ class _MarksPanelState extends State<MarksPanel> {
                   borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
             ),
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+          child: Row(children: [
+            for (final (i, label) in ['全部', '高亮', '划线'].indexed)
+              Padding(
+                padding: EdgeInsets.only(right: i == 0 ? 0 : 10),
+                child: ChoiceChip(
+                  label: Text(label),
+                  selected: _filter == i,
+                  onSelected: (_) => setState(() => _filter = i),
+                  labelStyle: TextStyle(
+                      fontSize: 14,
+                      color: _filter == i ? Colors.white : Theme.of(context).colorScheme.onSurface),
+                  selectedColor: _filter == 1 ? hlYellow : iosBlue,
+                  showCheckmark: false,
+                ),
+              ),
+          ]),
         ),
         Expanded(
           child: shown.isEmpty

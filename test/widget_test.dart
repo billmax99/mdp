@@ -155,6 +155,35 @@ void main() {
     expect(htmls[1], contains('第二章'));
   });
 
+  test('extractEpubHtml 图片解压并改写 src 为 file://', () async {
+    final png = [
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG 魔数（内容无需有效，只验证写出）
+    ];
+    final archive = Archive()
+      ..addFile(ArchiveFile('mimetype', 20, 'application/epub+zip'.codeUnits))
+      ..addFile(ArchiveFile(
+          'META-INF/container.xml', 300,
+          '<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>'))
+      ..addFile(ArchiveFile('content.opf', 300,
+          '<package><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest>'
+              '<spine><itemref idref="c1"/></spine></package>'))
+      ..addFile(ArchiveFile('images/pic.png', png.length, png))
+      ..addFile(ArchiveFile(
+          'c1.xhtml', 200, '<html><body><p><img src="images/pic.png"/></p></body></html>'));
+    final htmls = await extractEpubHtml(_tmp('t2.epub', (ZipEncoder().encode(archive) ?? const <int>[])));
+    expect(htmls.single, contains('file:///'));
+    expect(htmls.single, isNot(contains('images/pic.png"')));
+    // 解出的缓存文件真实存在
+    final m = RegExp(r'src="file:///([^"]+)"').firstMatch(htmls.single)!;
+    expect(File(m.group(1)!).existsSync(), isTrue);
+  });
+
+  test('epubChapterTitle 从 title/h1 提取章名', () {
+    expect(epubChapterTitle('<html><head><title>序章</title></head><body></body></html>', 0), '序章');
+    expect(epubChapterTitle('<html><body><h1>大标题</h1><p>x</p></body></html>', 1), '大标题');
+    expect(epubChapterTitle('<html><body><p>x</p></body></html>', 2), '');
+  });
+
   test('safeName 截断超长文件名并保留扩展名', () {
     final r = safeName('${'超' * 200}.md');
     expect(r.length, 80);
@@ -318,4 +347,82 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('阅读页：滚动后退出重开，位置被记忆', (t) async {
+    final buf = StringBuffer('# 长文');
+    for (var i = 1; i <= 60; i++) {
+      buf.write('\n\n第 $i 段：白日依山尽，黄河入海流。');
+    }
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: ReaderScreen(path: 't.md', title: 't位置.md', initialContent: buf.toString()),
+    ));
+    await t.pumpAndSettle();
+    final pos = t.state<ScrollableState>(find.byType(Scrollable).first).position;
+    await t.timedDrag(find.byType(Scrollable).first, const Offset(0, -400), const Duration(milliseconds: 600));
+    await t.pumpAndSettle();
+    expect(pos.pixels, greaterThan(0));
+    await t.pump(const Duration(milliseconds: 800)); // 防抖 600ms 后保存
+    // 重开同一文件
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: ReaderScreen(path: 't.md', title: 't位置.md', initialContent: buf.toString()),
+    ));
+    await t.pumpAndSettle();
+    await t.pump(const Duration(milliseconds: 50)); // post-frame 恢复
+    final pos2 = t.state<ScrollableState>(find.byType(Scrollable).first).position;
+    expect(pos2.pixels, greaterThan(0));
+  });
+
+  testWidgets('阅读页：目录按钮弹出大纲并含各级标题', (t) async {
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't大纲.md',
+        initialContent: '# 第一章 起点\n\n正文。\n\n## 1.1 小节\n\n正文。\n\n# 第二章 终点\n\n正文。',
+      ),
+    ));
+    await t.pumpAndSettle();
+    await t.tap(find.byTooltip('目录'));
+    await t.pumpAndSettle();
+    expect(find.text('目录'), findsWidgets);
+    // 正文标题与大纲条目同文本（sheet 叠在正文上），故 findsWidgets
+    expect(find.text('第一章 起点'), findsWidgets);
+    expect(find.text('1.1 小节'), findsWidgets);
+    expect(find.text('第二章 终点'), findsWidgets);
+  });
+
+  testWidgets('标注面板：筛选只显示高亮或划线', (t) async {
+    await saveMarks('t筛选.md', [
+      Mark('h1', '黄词一', '', '', 1, true, false, 0),
+      Mark('u1', '蓝词一', '', '', 2, false, false, 0),
+      Mark('h2', '黄词二', '', '', 3, true, false, 0),
+    ]);
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+          path: 't.md', title: 't筛选.md', initialContent: '# 标\n\n黄词一 蓝词一 黄词二'),
+    ));
+    await t.pumpAndSettle();
+    await t.tap(find.byTooltip('标注列表'));
+    await t.pumpAndSettle();
+    expect(find.text('黄词一'), findsOneWidget);
+    expect(find.text('蓝词一'), findsOneWidget);
+    await t.tap(find.text('高亮'));
+    await t.pumpAndSettle();
+    expect(find.text('黄词一'), findsOneWidget);
+    expect(find.text('黄词二'), findsOneWidget);
+    expect(find.text('蓝词一'), findsNothing);
+    await t.tap(find.text('划线'));
+    await t.pumpAndSettle();
+    expect(find.text('蓝词一'), findsOneWidget);
+    expect(find.text('黄词一'), findsNothing);
+  });
+
+  testWidgets('主题 auto：跟随系统模式渲染正常', (t) async {
+    appTheme.value = 'auto';
+    await t.pumpWidget(const HmdApp());
+    await t.pumpAndSettle();
+    expect(find.text('MD+'), findsOneWidget);
+    expect(appTheme.value, 'auto');
+  });
 }
