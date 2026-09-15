@@ -50,3 +50,4 @@ emu_log.txt
 temp/
 run_dbg.txt
 local.md
+dist/
