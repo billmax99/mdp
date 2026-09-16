@@ -59,3 +59,7 @@ key.properties
 /MD+_*
 /910898de3ac00a36e91831f930eb43a1.md
 /temp_pack.py
+
+# 仅安卓应用，Windows 桌面脚手架不入库
+# （如需恢复：flutter create --platforms=windows .）
+/windows/
