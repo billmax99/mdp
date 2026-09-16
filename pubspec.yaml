@@ -1,5 +1,5 @@
 name: hmd
-description: "A new Flutter project."
+description: "MD+ 本地文档阅读器：Markdown/TXT/PDF/EPUB/DOCX，标注、搜索、多主题，完全离线零权限。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

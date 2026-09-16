@@ -53,3 +53,9 @@ local.md
 dist/
 key.properties
 *.keystore
+
+# 本地工作文件与发布产物（不入库）
+/AI-PROMPT.md
+/MD+_*
+/910898de3ac00a36e91831f930eb43a1.md
+/temp_pack.py
