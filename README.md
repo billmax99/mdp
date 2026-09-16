@@ -55,14 +55,15 @@ flutter build apk --release  # 通用包；--target-platform android-arm64 可�
 本应用 **未申请任何 Android 系统权限**（含网络权限），技术上不存在联网与数据上传；
 文件访问仅通过系统标准选择器（SAF）与"用其他应用打开"机制进行。详见：
 
-| 文档 | 在线地址（GitHub Pages / Gitee Pages 镜像） |
+| 文档 | 在线地址（GitHub Pages 官方发布页） |
 |------|------|
-| 隐私政策 | <https://billmax99.github.io/mdp/privacy.html> · <https://bill_zzx.gitee.io/mdp/privacy.html> |
-| 用户服务协议 | <https://billmax99.github.io/mdp/agreement.html> · <https://billmax99.gitee.io/mdp/agreement.html> |
-| 权限使用说明 | <https://billmax99.github.io/mdp/permissions.html> · <https://bill_zzx.gitee.io/mdp/permissions.html> |
-| 版权声明 | <https://billmax99.github.io/mdp/copyright.html> · <https://bill_zzx.gitee.io/mdp/copyright.html> |
+| 隐私政策 | <https://billmax99.github.io/mdp/privacy.html> |
+| 用户服务协议 | <https://billmax99.github.io/mdp/agreement.html> |
+| 权限使用说明 | <https://billmax99.github.io/mdp/permissions.html> |
+| 版权声明 | <https://billmax99.github.io/mdp/copyright.html> |
 
 源文件位于仓库 `publish/` 目录，随应用版本一并维护。
+（Gitee 端仅镜像源代码与发行版；Gitee Pages 服务已停止对新仓库开通。）
 
 ## 开源许可
 
