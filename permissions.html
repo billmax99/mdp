@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="MD+ 权限使用说明：本应用未申请任何 Android 系统权限。">
+<title>权限使用说明 — MD+</title>
+<link rel="icon" href="assets/icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site"><div class="bar">
+  <img src="assets/icon.png" alt="MD+ 图标">
+  <a class="t" href="./">MD+</a>
+  <span class="v">权限使用说明</span>
+</div></header>
+
+<main class="wrap">
+  <h1>MD+ 权限使用说明</h1>
+  <p class="doc-meta">供应用市场审核提交使用 ｜ 2026-09-16</p>
+
+  <h2>权限总览</h2>
+  <p>经构建产物核验（aapt dump permissions），本应用 APK <b>未申请任何 Android
+  系统权限</b>——包括但不限于：网络访问、存储读写、位置、通讯录、相机、
+  麦克风、电话、短信、剪贴板等均未申请。</p>
+
+  <h2>APK 中唯一声明的权限项</h2>
+  <table>
+    <tr><th>权限</th><th>类型</th><th>用途说明</th></tr>
+    <tr>
+      <td><code>com.bill.hmd.DYNAMIC_RECEIVER_NOT_EXPORTED</code></td>
+      <td>应用自定义权限（非系统权限）</td>
+      <td>Android 13+ 系统为使用动态广播接收器的应用自动附加的占位保护权限，仅本应用自身可使用，不涉及访问任何用户数据或设备信息。属于框架自动生成，开发者未主动申请。</td>
+    </tr>
+  </table>
+
+  <h2>功能与权限的对应关系（逐项说明）</h2>
+  <table>
+    <tr><th>应用功能</th><th>是否需要权限</th><th>实现方式</th></tr>
+    <tr><td>打开本地文档</td><td>不需要</td><td>系统标准文件选择器（SAF），仅访问用户主动选中的文件，临时授权</td></tr>
+    <tr><td>接收微信等应用的「分享/打开」文件</td><td>不需要</td><td>系统标准 Intent 机制（VIEW/SEND），由来源应用主动传递</td></tr>
+    <tr><td>阅读标注/搜索/主题设置</td><td>不需要</td><td>数据存于应用私有目录</td></tr>
+    <tr><td>EPUB 插图显示</td><td>不需要</td><td>解压至应用私有缓存目录</td></tr>
+  </table>
+
+  <h2>特别声明</h2>
+  <ul>
+    <li>本应用<b>无 INTERNET 权限</b>，技术上不存在任何联网行为，不上传任何数据。</li>
+    <li>本应用不读取设备标识（IMEI/Android ID/OAID 等均不涉及）。</li>
+    <li>上述内容可通过系统「应用信息 → 权限」页面或反编译 APK 直接验证。</li>
+  </ul>
+</main>
+
+<footer class="site">
+  MD+ v2.4.1 · © 2026 bill_zzx · <a href="LICENSE">MIT License</a><br>
+  <a href="https://github.com/billmax99/mdp">GitHub</a> ·
+  <a href="https://gitee.com/bill_zzx/mdp">Gitee</a>
+</footer>
+</body>
+</html>
