@@ -63,3 +63,6 @@ key.properties
 # 仅安卓应用，Windows 桌面脚手架不入库
 # （如需恢复：flutter create --platforms=windows .）
 /windows/
+
+# 收款码原图（只入库加水印成品，见 tool/watermark_sponsor.py）
+/docs/sponsor/*_raw.png

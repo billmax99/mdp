@@ -1,5 +1,6 @@
 # 生成赞助收款码占位图（docs/sponsor/wechat.png / alipay.png）
-# 用途：README 赞助区先放占位图，拿到真实收款码后直接覆盖同名文件即可。
+# 用途：README 赞助区先放占位图。拿到真实收款码后：原图存为同目录 *_raw.png，
+# 再跑 tool/watermark_sponsor.py 生成带项目名水印的成品（覆盖同名文件）。
 # 外框造型：微信=咖啡杯（请喝咖啡），支付宝=猫头（买猫粮）。
 from PIL import Image, ImageDraw, ImageFont
 import math
