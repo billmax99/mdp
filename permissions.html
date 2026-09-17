@@ -17,7 +17,7 @@
 
 <main class="wrap">
   <h1>MD+ 权限使用说明</h1>
-  <p class="doc-meta">供应用市场审核提交使用 ｜ 2026-09-16</p>
+  <p class="doc-meta">供应用市场审核提交使用 ｜ 2026-09-17</p>
 
   <h2>权限总览</h2>
   <p>经构建产物核验（aapt dump permissions），本应用 APK <b>未申请任何 Android
@@ -47,14 +47,15 @@
   <ul>
     <li>本应用<b>无 INTERNET 权限</b>，技术上不存在任何联网行为，不上传任何数据。</li>
     <li>本应用不读取设备标识（IMEI/Android ID/OAID 等均不涉及）。</li>
+    <li>本应用未集成任何第三方统计、广告、推送或崩溃上报 SDK；
+        全部依赖均为本地功能组件，清单见<a href="license.html">《开源许可声明》</a>。</li>
     <li>上述内容可通过系统「应用信息 → 权限」页面或反编译 APK 直接验证。</li>
   </ul>
 </main>
 
 <footer class="site">
   MD+ v2.4.1 · © 2026 bill_zzx · <a href="LICENSE">MIT License</a><br>
-  <a href="https://gitee.com/bill_zzx/mdp">Gitee（主仓库）</a> ·
-  <a href="https://github.com/billmax99/mdp">GitHub（备仓库）</a>
+  <a href="https://gitee.com/bill_zzx/mdp">Gitee 主仓库</a>
 </footer>
 </body>
 </html>
