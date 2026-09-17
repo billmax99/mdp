@@ -9,8 +9,7 @@ MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到�
 
 ## 下载
 
-- **Gitee 下载（主仓库，国内直连快）**：<https://gitee.com/bill_zzx/mdp/releases>
-- **GitHub 下载（备仓库）**：<https://github.com/billmax99/mdp/releases>
+- **Gitee 下载（国内直连快）**：<https://gitee.com/bill_zzx/mdp/releases>
 
 现代手机选 arm64 包即可（更小，约 25 MB）。之前装过测试版的话，先卸载再装正式版。
 
@@ -28,9 +27,9 @@ MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到�
 MD+ 没有申请任何手机权限——包括联网权限。它上不了网，也读不到你的其他文件；
 你的文档和标注只保存在手机本地，卸载即全部删除。无广告、无统计、无推送。
 
-- [隐私政策](https://billmax99.github.io/mdp/privacy.html)
-- [用户服务协议](https://billmax99.github.io/mdp/agreement.html)
-- [权限使用说明](https://billmax99.github.io/mdp/permissions.html)
+- [隐私政策](https://gitee.com/bill_zzx/mdp/blob/master/publish/隐私政策.md)
+- [用户服务协议](https://gitee.com/bill_zzx/mdp/blob/master/publish/用户服务协议.md)
+- [权限使用说明](https://gitee.com/bill_zzx/mdp/blob/master/publish/权限使用说明.md)
 
 ## 请开发者喝杯咖啡 ☕ 或给猫主子添点猫粮 🐱
 
@@ -43,6 +42,6 @@ MD+ 没有申请任何手机权限——包括联网权限。它上不了网，�
 ## 更多
 
 - [使用说明](使用说明.md) —— 详细用法与完整版本历史
-- [版权声明](https://billmax99.github.io/mdp/copyright.html)
+- [版权声明](https://gitee.com/bill_zzx/mdp/blob/master/publish/版权声明.md)
 
 本软件开源，采用 [MIT 许可证](LICENSE) · © 2026 bill_zzx
