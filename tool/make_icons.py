@@ -26,7 +26,7 @@ legacy = Image.new("RGBA", (S, S), BLUE)
 legacy.alpha_composite(draw_md((255, 255, 255, 255), 340))
 legacy.convert("RGB").save("tool/icons/icon_legacy.png")
 
-# 网站无字版：纯蓝底（页头/主视觉旁必有 MD+ 文字，图内带字会读成两个 MD+）
+# 无字版备用变体：纯蓝底（官网曾试用后改回完整图标，文件保留备用）
 Image.new("RGBA", (S, S), BLUE).convert("RGB").save("tool/icons/icon_plain.png")
 
 # Windows ico（多尺寸）
