@@ -33,7 +33,7 @@ footer.site{text-align:center;color:var(--muted);font-size:13.5px;padding:28px 1
 .sponsor img{width:200px;height:235px;object-fit:contain;background:#fff;border:1px solid #e5e5ea;border-radius:12px}
 .sponsor .cap{font-size:14px;color:var(--muted);margin-top:6px}
 .hero{text-align:center;padding:36px 0 8px}
-.hero img{width:88px;height:88px;border-radius:20px}
+.hero img{width:88px;height:88px;border-radius:20px;margin-bottom:12px}
 .hero h1{margin:14px 0 6px}
 .hero .slogan{color:var(--muted);font-size:17px;margin:0}
 .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0 4px}
