@@ -26,6 +26,9 @@ legacy = Image.new("RGBA", (S, S), BLUE)
 legacy.alpha_composite(draw_md((255, 255, 255, 255), 340))
 legacy.convert("RGB").save("tool/icons/icon_legacy.png")
 
+# 网站无字版：纯蓝底（页头/主视觉旁必有 MD+ 文字，图内带字会读成两个 MD+）
+Image.new("RGBA", (S, S), BLUE).convert("RGB").save("tool/icons/icon_plain.png")
+
 # Windows ico（多尺寸）
 legacy.save("windows/runner/resources/app_icon.ico",
             format="ICO", sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
