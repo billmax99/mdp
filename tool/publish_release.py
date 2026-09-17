@@ -77,8 +77,11 @@ def gitee_publish(tag, name, body, apk_path):
                            % boundary})
     assets = json.loads(raw)
     for a in assets:
-        print("Gitee asset: %s (%s bytes)" % (a.get("browser_download_url"),
-                                              a.get("size")))
+        if isinstance(a, str):
+            print("Gitee asset: %s" % a)
+        else:
+            print("Gitee asset: %s (%s bytes)"
+                  % (a.get("browser_download_url"), a.get("size")))
     print("Gitee 页面: https://gitee.com/bill_zzx/mdp/releases/tag/%s" % tag)
 
 
@@ -87,7 +90,7 @@ if __name__ == "__main__":
     apk = sys.argv[2]
     notes = sys.argv[3] if len(sys.argv) > 3 else os.path.join(
         os.path.dirname(__file__), "..", "publish",
-        "%s_release_notes.md" % tag.lstrip("v"))
+        "%s_release_notes.md" % tag)
     name = "MD+ %s" % tag.lstrip("v")
     body = open(os.path.abspath(notes), encoding="utf-8").read()
     print("== GitHub ==")
