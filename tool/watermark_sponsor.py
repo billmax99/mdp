@@ -1,10 +1,11 @@
-# 把真实微信赞赏码合成咖啡杯外框，输出 docs/sponsor/wechat_luckin.png
-# （wechat_other.png 为同一张码的副本，文件名保留备用）
+# 把真实微信赞赏码合成虚线外框，输出 docs/sponsor/ 下的成品图
+#   wechat_luckin.png — 咖啡杯版（README/Pages 左栏）
+#   wechat_bottle.png — 奶瓶版（右栏）；两栏共用同一张码
 # 用法：
 #   1. 赞赏码原图（截图裁好后）存为 docs/sponsor/wechat_luckin_raw.png
 #      （*_raw.png 已 gitignore，只有成品入库）
 #   2. python tool/watermark_sponsor.py
-# 布局：二维码放大放进杯身，引导语（原图底部文字）拆出来放在碟子下方。
+# 布局：二维码放大放进外框内部，原图底部的引导语拆出来放在框下方。
 # 无横幅水印（2026-09-17 用户要求去掉）；二维码像素等比缩放，不影响扫码。
 # 杯子画法沿用 tool/make_sponsor_placeholders.py 的虚线外框。
 from PIL import Image, ImageDraw
@@ -12,14 +13,11 @@ import math
 import os
 
 SPONSOR_DIR = os.path.join(os.path.dirname(__file__), "..", "docs", "sponsor")
-SLOTS = ["wechat_luckin", "wechat_other"]
 
-W, H = 400, 440
 DASH, GAP, WIDTH = 12, 8, 3
-COFFEE = (101, 67, 33)
-LIGHT = (160, 110, 70)
-QR_MAX_W, QR_MAX_H = 236, 240   # 杯身内码的尺寸上限
-QUOTE_MAX_W = 280               # 碟下引导语的宽度上限
+COFFEE = (101, 67, 33)     # 咖啡棕
+LIGHT = (160, 110, 70)     # 浅棕（热气/碟子/奶瓶刻度共用浅色调）
+MILK = (91, 146, 229)      # 奶瓶蓝
 
 
 def dash_poly(draw, pts, fill, dash=DASH, gap=GAP, width=WIDTH):
@@ -53,7 +51,7 @@ def arc_pts(cx, cy, rx, ry, a0, a1, n=72):
 
 
 def draw_cup_frame(draw):
-    """咖啡杯虚线外框：杯口、杯身、杯柄、热气、碟子。"""
+    """咖啡杯虚线外框：杯口、杯身、杯柄、热气、碟子。内域 x74..326, y74..328。"""
     dash_poly(draw, [(70, 70), (330, 70)], COFFEE)                 # 杯口
     contour = [(330, 70), (330, 290)]
     contour += arc_pts(290, 290, 40, 40, 0, 90)                    # 右下圆角
@@ -67,6 +65,30 @@ def draw_cup_frame(draw):
                  for i in range(6)]
         dash_poly(draw, steam, LIGHT, dash=8, gap=6, width=2)
     dash_poly(draw, arc_pts(200, 355, 140, 20, 0, 360), LIGHT)     # 碟子
+
+
+def draw_bottle_frame(draw):
+    """奶瓶虚线外框：奶嘴、瓶口环、肩、瓶身、刻度。内域 x99..301, y144..356。"""
+    dash_poly(draw, arc_pts(200, 48, 15, 28, 0, 360), MILK)        # 奶嘴
+    dash_poly(draw, [(166, 78), (234, 78), (234, 102), (166, 102),
+                     (166, 78)], MILK)                             # 瓶口环
+    dash_poly(draw, [(166, 102), (95, 140)], MILK)                 # 左肩
+    dash_poly(draw, [(234, 102), (305, 140)], MILK)                # 右肩
+    contour = [(95, 140), (95, 330)]
+    contour += arc_pts(123, 330, 28, 28, 180, 90)                  # 左下圆角
+    contour += [(123, 358), (277, 358)]
+    contour += arc_pts(277, 330, 28, 28, 270, 360)                 # 右下圆角
+    contour += [(305, 330), (305, 140)]
+    dash_poly(draw, contour, MILK)                                 # 瓶身
+
+
+# 每档：画框函数、画布尺寸、码的尺寸上限、码的内域 y 范围、引导语 y
+SLOTS = [
+    ("wechat_luckin", "wechat_luckin_raw.png", draw_cup_frame,
+     (400, 440), (236, 240), (74, 328), 396),
+    ("wechat_bottle", "wechat_luckin_raw.png", draw_bottle_frame,
+     (400, 455), (200, 200), (144, 356), 405),
+]
 
 
 def trim_and_split(raw):
@@ -104,26 +126,29 @@ def fit(img, max_w, max_h):
                       Image.LANCZOS)
 
 
-def compose(raw_path, dst, brand):
+def compose(raw_path, dst, brand, frame_fn, canvas_wh, qr_max, qr_band, quote_y):
+    W, H = canvas_wh
     raw = Image.open(raw_path).convert("RGB")
     qr, quote = trim_and_split(raw)
-    qr = fit(qr, QR_MAX_W, QR_MAX_H)
-    quote = fit(quote, QUOTE_MAX_W, quote.height * QUOTE_MAX_W / quote.width)
+    qr = fit(qr, qr_max[0], qr_max[1])
+    quote = fit(quote, 280, quote.height * 280 / quote.width)
 
     canvas = Image.new("RGB", (W, H), "white")
-    draw_cup_frame(ImageDraw.Draw(canvas))
-    # 码在杯身内垂直水平居中（杯身内域 y74..328）
-    canvas.paste(qr, ((W - qr.width) // 2, (74 + 328 - qr.height) // 2))
-    # 引导语在碟子下方居中
-    canvas.paste(quote, ((W - quote.width) // 2, 396))
+    frame_fn(ImageDraw.Draw(canvas))
+    # 码在框内域垂直水平居中
+    canvas.paste(qr, ((W - qr.width) // 2,
+                      (qr_band[0] + qr_band[1] - qr.height) // 2))
+    # 引导语在框下方居中
+    canvas.paste(quote, ((W - quote.width) // 2, quote_y))
     canvas.save(dst)
     print(f"{brand}: {raw_path} -> {dst} ({W}x{H}, qr {qr.width}x{qr.height}, "
           f"quote {quote.width}x{quote.height})")
 
 
 if __name__ == "__main__":
-    for name in SLOTS:
-        raw = os.path.join(SPONSOR_DIR, f"{name}_raw.png")
+    for name, raw_name, frame_fn, wh, qr_max, band, quote_y in SLOTS:
+        raw = os.path.join(SPONSOR_DIR, raw_name)
         if not os.path.exists(raw):
             raise SystemExit(f"缺少 {raw}（先把赞赏码原图存为该文件）")
-        compose(raw, os.path.join(SPONSOR_DIR, f"{name}.png"), name)
+        compose(raw, os.path.join(SPONSOR_DIR, f"{name}.png"), name,
+                frame_fn, wh, qr_max, band, quote_y)
