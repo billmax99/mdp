@@ -1,16 +1,14 @@
 # 赞助赞赏码说明
 
-本目录存放 README 赞助区引用的赞赏码图片，两栏均为**微信赞赏码**：
+本目录存放 README 赞助区引用的赞赏码图片（**微信赞赏码**）：
 
-- `wechat_luckin.png` — 瑞幸档：赞助一口瑞幸
-- `wechat_other.png` — 其它档：赞助一口其它
+- `wechat_luckin.png` — 正式赞赏码（顶部带"MD+ 官方赞赏码"绿横幅）
+- `wechat_other.png` — 同一张码的副本（两栏方案遗留，文件名保留备用）
 
-当前为**占位图**（由 `tool/make_sponsor_placeholders.py` 生成）。
-获取真实赞赏码后：原图存为对应 `*_raw.png`，跑 `python tool/watermark_sponsor.py`
-生成带"MD+ 官方赞赏码"横幅的水印图（覆盖上述文件名），提交即可，
-README 与 Pages 引用的文件名不变、无需改动。
+当前为**真实赞赏码**（2026-09-17 整合）：原图为微信赞赏码截图，
+已裁掉底部金色"×× 的赞赏码"横幅与四角截图选择点（保留
+"很高兴md+对你有用"引导语），再由 `tool/watermark_sponsor.py`
+加顶部官方横幅生成。README 与 Pages 均只展示 `wechat_luckin.png`。
 
-> 微信：我 → 服务 → 收付款 → 赞赏码（金额设为 1 元）。
-> 若微信端只能保留一张赞赏码，两栏可共用同一张码图。
-
-建议导出 PNG/JPG，尺寸不小于 400×400。`*_raw.png` 已 gitignore，不入库。
+若日后换码：新原图存为 `wechat_luckin_raw.png`，重跑水印脚本，
+同步 gh-pages `assets/sponsor-luckin.png` 即可，展示文件名不变。
