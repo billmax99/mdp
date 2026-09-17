@@ -1,5 +1,5 @@
 # 生成赞助赞赏码占位图（docs/sponsor/wechat_luckin.png / wechat_other.png）
-# 两栏均为微信赞赏码：咖啡杯=赞助一杯瑞幸，猫头=赞助一杯其它。
+# 两栏均为微信赞赏码：咖啡杯=赞助一口瑞幸，猫头=赞助一口其它。
 # 用途：README 赞助区先放占位图。拿到真实赞赏码后：原图存为同目录 *_raw.png，
 # 再跑 tool/watermark_sponsor.py 生成带项目名水印的成品（覆盖同名文件）。
 from PIL import Image, ImageDraw, ImageFont
@@ -55,7 +55,7 @@ def qr_mark(draw, cx, cy, size, color):
 
 
 def draw_coffee(draw, title_font, sub_font, hint_font):
-    """咖啡杯外框（咖啡棕）——赞助一杯瑞幸。"""
+    """咖啡杯外框（咖啡棕）——赞助一口瑞幸。"""
     coffee = (101, 67, 33)
     light = (160, 110, 70)
     # 杯口
@@ -80,13 +80,13 @@ def draw_coffee(draw, title_font, sub_font, hint_font):
     # 内容行与猫头图对齐（QR 中心 185 / 标题 262 / 副标题 300，两图一致）
     qr_mark(draw, 200, 185, 100, coffee)
     draw.text((200, 262), "微信赞赏码", font=title_font, fill=coffee, anchor="mm")
-    draw.text((200, 300), "（占位图 · 赞助一杯瑞幸）", font=sub_font, fill=GRAY, anchor="mm")
-    draw.text((200, 440), "请替换为真实赞赏码（流程见 docs/sponsor/README.md）",
+    draw.text((200, 300), "（占位图 · 赞助一口瑞幸）", font=sub_font, fill=GRAY, anchor="mm")
+    draw.text((200, 440), "占位图 · 请替换为真实赞赏码",
               font=hint_font, fill=GRAY, anchor="mm")
 
 
 def draw_cat(draw, title_font, sub_font, hint_font):
-    """猫头外框（微信绿）——赞助一杯其它。"""
+    """猫头外框（微信绿）——赞助一口其它。"""
     green = (7, 193, 96)
     cx, cy, r = 200, 255, 140
     # 左耳：圆上 190°~230° 两点向外拉出三角
@@ -108,8 +108,8 @@ def draw_cat(draw, title_font, sub_font, hint_font):
     # 内容行与咖啡杯图对齐（QR 中心 185 / 标题 262 / 副标题 300，两图一致）
     qr_mark(draw, 200, 185, 100, green)
     draw.text((200, 262), "微信赞赏码", font=title_font, fill=green, anchor="mm")
-    draw.text((200, 300), "（占位图 · 赞助一杯其它）", font=sub_font, fill=GRAY, anchor="mm")
-    draw.text((200, 440), "请替换为真实赞赏码（流程见 docs/sponsor/README.md）",
+    draw.text((200, 300), "（占位图 · 赞助一口其它）", font=sub_font, fill=GRAY, anchor="mm")
+    draw.text((200, 440), "占位图 · 请替换为真实赞赏码",
               font=hint_font, fill=GRAY, anchor="mm")
 
 

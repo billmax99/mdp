@@ -3,7 +3,7 @@
 ![版本](https://img.shields.io/badge/version-2.4.1-blue) ![平台](https://img.shields.io/badge/platform-Android%207.0%2B-green) ![许可](https://img.shields.io/badge/license-MIT-orange) ![离线](https://img.shields.io/badge/%E7%A6%BB%E7%BA%BF-%E9%9B%B6%E6%9D%83%E9%99%90-brightgreen)
 
 MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到的文件打不开」这个场景而生：
-在微信里长按文件，选「用其他应用打开」，剩下的交给它。
+在微信里点开文件，点「用其它程序打开」，选 MD+，剩下的交给它。
 
 没有广告，不索取任何权限，完全不联网，界面简单顺手、单手可用。
 
@@ -31,15 +31,16 @@ MD+ 没有申请任何手机权限——包括联网权限。它上不了网，�
 - [用户服务协议](https://gitee.com/bill_zzx/mdp/blob/master/publish/用户服务协议.md)
 - [权限使用说明](https://gitee.com/bill_zzx/mdp/blob/master/publish/权限使用说明.md)
 
-## 请开发者喝杯咖啡 ☕
+## 请开发者喝一口咖啡 ☕
 
-如果 MD+ 帮到了你，欢迎赞助支持——完全自愿，感谢！
+如果 MD+ 帮到了你，欢迎扫码赞赏——只要 1 元，完全自愿。不为收钱，
+只想统计一下它对多少人有用，感谢支持！
 
-| 赞助一杯瑞幸 | 赞助一杯其它 |
+| 赞助一口瑞幸 | 赞助一口其它 |
 |------|--------|
-| ![微信赞赏码：赞助一杯瑞幸](docs/sponsor/wechat_luckin.png) | ![微信赞赏码：赞助一杯其它](docs/sponsor/wechat_other.png) |
+| ![微信赞赏码：赞助一口瑞幸](docs/sponsor/wechat_luckin.png) | ![微信赞赏码：赞助一口其它](docs/sponsor/wechat_other.png) |
 
-两栏均为微信赞赏码，金额可自选。
+两栏均为微信赞赏码，扫哪个都行，金额 1 元。
 
 ## 更多
 
