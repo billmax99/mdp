@@ -9,8 +9,8 @@ MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到�
 
 ## 下载
 
-- **GitHub 下载（推荐）**：<https://github.com/billmax99/mdp/releases>
-- **Gitee 下载（国内镜像）**：<https://gitee.com/bill_zzx/mdp/releases>
+- **Gitee 下载（主仓库，国内直连快）**：<https://gitee.com/bill_zzx/mdp/releases>
+- **GitHub 下载（备仓库）**：<https://github.com/billmax99/mdp/releases>
 
 现代手机选 arm64 包即可（更小，约 25 MB）。之前装过测试版的话，先卸载再装正式版。
 
