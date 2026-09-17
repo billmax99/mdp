@@ -1,7 +1,7 @@
-# 生成赞助收款码占位图（docs/sponsor/wechat.png / alipay.png）
-# 用途：README 赞助区先放占位图。拿到真实收款码后：原图存为同目录 *_raw.png，
+# 生成赞助赞赏码占位图（docs/sponsor/wechat_luckin.png / wechat_other.png）
+# 两栏均为微信赞赏码：咖啡杯=赞助一杯瑞幸，猫头=赞助一杯其它。
+# 用途：README 赞助区先放占位图。拿到真实赞赏码后：原图存为同目录 *_raw.png，
 # 再跑 tool/watermark_sponsor.py 生成带项目名水印的成品（覆盖同名文件）。
-# 外框造型：微信=咖啡杯（请喝咖啡），支付宝=猫头（买猫粮）。
 from PIL import Image, ImageDraw, ImageFont
 import math
 import os
@@ -54,8 +54,8 @@ def qr_mark(draw, cx, cy, size, color):
                    outline=color, width=3)
 
 
-def draw_wechat(draw, title_font, sub_font, hint_font):
-    """咖啡杯外框（咖啡棕）。"""
+def draw_coffee(draw, title_font, sub_font, hint_font):
+    """咖啡杯外框（咖啡棕）——赞助一杯瑞幸。"""
     coffee = (101, 67, 33)
     light = (160, 110, 70)
     # 杯口
@@ -78,15 +78,15 @@ def draw_wechat(draw, title_font, sub_font, hint_font):
     dash_poly(draw, arc_pts(200, 355, 140, 20, 0, 360), light)
     # 内容
     qr_mark(draw, 200, 175, 100, coffee)
-    draw.text((200, 262), "微信收款码", font=title_font, fill=coffee, anchor="mm")
-    draw.text((200, 300), "（占位图 · 请我喝咖啡）", font=sub_font, fill=GRAY, anchor="mm")
-    draw.text((200, 440), "请替换为真实收款码图片，保持文件名不变",
+    draw.text((200, 262), "微信赞赏码", font=title_font, fill=coffee, anchor="mm")
+    draw.text((200, 300), "（占位图 · 赞助一杯瑞幸）", font=sub_font, fill=GRAY, anchor="mm")
+    draw.text((200, 440), "请替换为真实赞赏码（流程见 docs/sponsor/README.md）",
               font=hint_font, fill=GRAY, anchor="mm")
 
 
-def draw_alipay(draw, title_font, sub_font, hint_font):
-    """猫头外框（支付宝蓝）。"""
-    blue = (32, 120, 255)
+def draw_cat(draw, title_font, sub_font, hint_font):
+    """猫头外框（微信绿）——赞助一杯其它。"""
+    green = (7, 193, 96)
     cx, cy, r = 200, 255, 140
     # 左耳：圆上 190°~230° 两点向外拉出三角
     p190 = (cx + r * math.cos(math.radians(190)), cy + r * math.sin(math.radians(190)))
@@ -97,17 +97,17 @@ def draw_alipay(draw, title_font, sub_font, hint_font):
     p350 = (cx + r * math.cos(math.radians(350)), cy + r * math.sin(math.radians(350)))
     apex_r = (334, 112)
     # 头顶弧（两耳之间：230°→310° 经过 270°）
-    dash_poly(draw, arc_pts(cx, cy, r, r, 230, 310), blue)
+    dash_poly(draw, arc_pts(cx, cy, r, r, 230, 310), green)
     # 下半圆弧（350°→190° 经过 0/90/180°）
-    dash_poly(draw, arc_pts(cx, cy, r, r, 350, 550), blue)
+    dash_poly(draw, arc_pts(cx, cy, r, r, 350, 550), green)
     # 两只耳朵
-    dash_poly(draw, [p190, apex_l, p230], blue)
-    dash_poly(draw, [p310, apex_r, p350], blue)
+    dash_poly(draw, [p190, apex_l, p230], green)
+    dash_poly(draw, [p310, apex_r, p350], green)
     # 内容（猫脸位置放二维码示意）
-    qr_mark(draw, 200, 200, 100, blue)
-    draw.text((200, 295), "支付宝收款码", font=title_font, fill=blue, anchor="mm")
-    draw.text((200, 332), "（占位图 · 给猫买粮）", font=sub_font, fill=GRAY, anchor="mm")
-    draw.text((200, 440), "请替换为真实收款码图片，保持文件名不变",
+    qr_mark(draw, 200, 200, 100, green)
+    draw.text((200, 295), "微信赞赏码", font=title_font, fill=green, anchor="mm")
+    draw.text((200, 332), "（占位图 · 赞助一杯其它）", font=sub_font, fill=GRAY, anchor="mm")
+    draw.text((200, 440), "请替换为真实赞赏码（流程见 docs/sponsor/README.md）",
               font=hint_font, fill=GRAY, anchor="mm")
 
 
@@ -116,7 +116,7 @@ title_font = ImageFont.truetype(FONT, 34)
 sub_font = ImageFont.truetype(FONT, 22)
 hint_font = ImageFont.truetype(FONT, 18)  # 20 字提示在 400px 画布内需 ≤18px 才不裁切
 
-for name, painter in [("wechat.png", draw_wechat), ("alipay.png", draw_alipay)]:
+for name, painter in [("wechat_luckin.png", draw_coffee), ("wechat_other.png", draw_cat)]:
     img = Image.new("RGB", (W, H), "white")
     painter(ImageDraw.Draw(img), title_font, sub_font, hint_font)
     img.save(os.path.join(OUT_DIR, name))

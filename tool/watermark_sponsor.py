@@ -1,19 +1,20 @@
-# 给真实收款码加项目名水印，输出 docs/sponsor/{wechat,alipay}.png
+# 给真实微信赞赏码加项目名水印，输出 docs/sponsor/wechat_luckin.png / wechat_other.png
 # 用法：
-#   1. 把微信/支付宝收款码原图存为 docs/sponsor/wechat_raw.png / alipay_raw.png
+#   1. 把两档微信赞赏码原图存为 docs/sponsor/wechat_luckin_raw.png / wechat_other_raw.png
 #      （*_raw.png 已 gitignore，只有加水印的成品入库）
 #   2. python tool/watermark_sponsor.py
-# 水印为顶部品牌色横幅（微信绿/支付宝蓝），二维码像素完全不动，不影响扫码。
-# 自定义出路径测试：python tool/watermark_sponsor.py <输入> <输出> <wechat|alipay>
+# 水印为顶部微信绿横幅，二维码像素完全不动，不影响扫码。
+# 自定义出路径测试：python tool/watermark_sponsor.py <输入> <输出>
 from PIL import Image, ImageDraw, ImageFont
 import os
 import sys
 
 FONT = r"C:\Windows\Fonts\msyh.ttc"
 SPONSOR_DIR = os.path.join(os.path.dirname(__file__), "..", "docs", "sponsor")
-TEXT = "MD+ 官方收款码 · billmax99"
+SLOTS = ["wechat_luckin", "wechat_other"]  # 瑞幸档 / 其它档
+TEXT = "MD+ 官方赞赏码 · billmax99"
 BANNER_H = 60
-BRAND = {"wechat": (7, 193, 96), "alipay": (22, 119, 255)}  # 微信绿 / 支付宝蓝
+BANNER_COLOR = (7, 193, 96)  # 微信绿（两档均为微信赞赏码）
 TARGET_W = 400
 
 
@@ -32,7 +33,7 @@ def watermark(src, dst, brand):
     out = Image.new("RGB", (TARGET_W, img.height + BANNER_H), "white")
     out.paste(img, (0, BANNER_H))
     draw = ImageDraw.Draw(out)
-    draw.rectangle([0, 0, TARGET_W, BANNER_H - 1], fill=BRAND[brand])
+    draw.rectangle([0, 0, TARGET_W, BANNER_H - 1], fill=BANNER_COLOR)
     # 字号自适应：从 22px 起缩到文字放得下为止
     size = 22
     while size > 12:
@@ -47,11 +48,11 @@ def watermark(src, dst, brand):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 4:
-        watermark(sys.argv[1], sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 3:
+        watermark(sys.argv[1], sys.argv[2], "custom")
     else:
-        for name in ("wechat", "alipay"):
+        for name in SLOTS:
             raw = os.path.join(SPONSOR_DIR, f"{name}_raw.png")
             if not os.path.exists(raw):
-                sys.exit(f"缺少 {raw}（先把真实收款码原图存为该文件）")
+                sys.exit(f"缺少 {raw}（先把该档微信赞赏码原图存为该文件）")
             watermark(raw, os.path.join(SPONSOR_DIR, f"{name}.png"), name)

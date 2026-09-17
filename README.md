@@ -31,13 +31,15 @@ MD+ 没有申请任何手机权限——包括联网权限。它上不了网，�
 - [用户服务协议](https://gitee.com/bill_zzx/mdp/blob/master/publish/用户服务协议.md)
 - [权限使用说明](https://gitee.com/bill_zzx/mdp/blob/master/publish/权限使用说明.md)
 
-## 请开发者喝杯咖啡 ☕ 或给猫主子添点猫粮 🐱
+## 请开发者喝杯咖啡 ☕
 
 如果 MD+ 帮到了你，欢迎赞助支持——完全自愿，感谢！
 
-| 微信 | 支付宝 |
+| 赞助一杯瑞幸 | 赞助一杯其它 |
 |------|--------|
-| ![微信收款码](docs/sponsor/wechat.png) | ![支付宝收款码](docs/sponsor/alipay.png) |
+| ![微信赞赏码：赞助一杯瑞幸](docs/sponsor/wechat_luckin.png) | ![微信赞赏码：赞助一杯其它](docs/sponsor/wechat_other.png) |
+
+两栏均为微信赞赏码，金额可自选。
 
 ## 更多
 
