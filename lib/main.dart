@@ -1880,6 +1880,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
             child: ValueListenableBuilder<double>(
           valueListenable: appFont,
           builder: (_, fs, _) {
+            // 字号变化只重建本子树（外层 build/滚动都不会触发），必须在此
+            // 补挂重测，否则标注矩形停留在旧字号布局——划线/高亮整体跑位
+            _scheduleMeasure();
             final blocks = _blocksOf(_content!);
             final children = <Widget>[];
             for (final (bi, raw) in blocks.indexed) {

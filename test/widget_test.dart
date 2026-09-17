@@ -273,6 +273,33 @@ void main() {
     expect(find.text('删除'), findsOneWidget);
   });
 
+  // 回归（真机 bug）：改字号后正文重排，若不重测标注矩形，划线/高亮停留在
+  // 旧布局位置——点文字新位置无法命中菜单；修复后必须跟随重排
+  testWidgets('阅读页：放大字号后标注跟随文字（点新位置仍命中）', (t) async {
+    final m = Mark('mf1', '世界', '你好，', '。', 1, true, false, 1);
+    await saveMarks('t字号.md', [m]);
+    await t.pumpWidget(MaterialApp(
+      theme: HmdApp.theme('light'),
+      home: const ReaderScreen(
+        path: 't.md', title: 't字号.md', initialContent: '# 标\n\n你好，世界。OK',
+      ),
+    ));
+    await t.pumpAndSettle();
+    await t.pump(); // 触发 post-frame 矩形测量
+    // 基线：默认字号下点击标注文字能出菜单
+    await t.tapAt(t.getCenter(find.textContaining('世界').first));
+    await t.pumpAndSettle();
+    expect(find.text('删除'), findsOneWidget);
+    // 放大字号：正文重排。若矩形未重测（旧字号坐标），本次点击将落空，
+    // _onBodyTap 的无命中分支会关掉菜单，"删除"应消失——即为失败态
+    appFont.value = 30;
+    await t.pumpAndSettle();
+    await t.pump();
+    await t.tapAt(t.getCenter(find.textContaining('世界').first));
+    await t.pumpAndSettle();
+    expect(find.text('删除'), findsOneWidget);
+  });
+
   testWidgets('阅读页：长按选词→浮条→点高亮→保存渲染消失（一段式）', (t) async {
     await t.pumpWidget(MaterialApp(
       theme: HmdApp.theme('light'),
