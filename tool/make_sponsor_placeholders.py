@@ -77,7 +77,8 @@ def draw_coffee(draw, title_font, sub_font, hint_font):
     # 碟子
     dash_poly(draw, arc_pts(200, 355, 140, 20, 0, 360), light)
     # 内容
-    qr_mark(draw, 200, 175, 100, coffee)
+    # 内容行与猫头图对齐（QR 中心 185 / 标题 262 / 副标题 300，两图一致）
+    qr_mark(draw, 200, 185, 100, coffee)
     draw.text((200, 262), "微信赞赏码", font=title_font, fill=coffee, anchor="mm")
     draw.text((200, 300), "（占位图 · 赞助一杯瑞幸）", font=sub_font, fill=GRAY, anchor="mm")
     draw.text((200, 440), "请替换为真实赞赏码（流程见 docs/sponsor/README.md）",
@@ -104,9 +105,10 @@ def draw_cat(draw, title_font, sub_font, hint_font):
     dash_poly(draw, [p190, apex_l, p230], green)
     dash_poly(draw, [p310, apex_r, p350], green)
     # 内容（猫脸位置放二维码示意）
-    qr_mark(draw, 200, 200, 100, green)
-    draw.text((200, 295), "微信赞赏码", font=title_font, fill=green, anchor="mm")
-    draw.text((200, 332), "（占位图 · 赞助一杯其它）", font=sub_font, fill=GRAY, anchor="mm")
+    # 内容行与咖啡杯图对齐（QR 中心 185 / 标题 262 / 副标题 300，两图一致）
+    qr_mark(draw, 200, 185, 100, green)
+    draw.text((200, 262), "微信赞赏码", font=title_font, fill=green, anchor="mm")
+    draw.text((200, 300), "（占位图 · 赞助一杯其它）", font=sub_font, fill=GRAY, anchor="mm")
     draw.text((200, 440), "请替换为真实赞赏码（流程见 docs/sponsor/README.md）",
               font=hint_font, fill=GRAY, anchor="mm")
 
