@@ -6,7 +6,8 @@ header.site{background:var(--card);border-bottom:1px solid #e5e5ea}
 header.site .bar{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:14px 20px}
 header.site img{width:40px;height:40px;border-radius:9px}
 header.site .t{font-size:20px;font-weight:700;color:var(--text);text-decoration:none}
-header.site .v{color:var(--muted);font-size:13px;margin-left:auto}
+header.site .v{color:var(--muted);font-size:13px}
+header.site .lang{color:var(--muted);font-size:13px;margin-left:auto}
 h1{font-size:26px;margin:32px 0 8px}
 h2{font-size:19px;margin:28px 0 8px;padding-left:10px;border-left:4px solid var(--accent)}
 p,li{font-size:15.5px}
