@@ -48,7 +48,7 @@ MD+ requests zero Android permissions, including network. It physically cannot s
 
 Bugs and ideas → [GitHub Issues](https://github.com/billmax99/mdp/issues). That's the fastest route, and it's public so answers help everyone.
 
-Privacy questions or anything personal → **liuxialai25+mdp@gmail.com**
+Privacy questions or anything personal → **mdp.supporter+mdp@gmail.com**
 
 ## License
 

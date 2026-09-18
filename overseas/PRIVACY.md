@@ -32,7 +32,7 @@ If this policy changes, the change will be called out in the release notes. Chan
 
 There is no personal data to access, correct, or delete. Uninstalling the app removes every local trace — documents, annotations, preferences — with no cloud residue.
 
-For anything else, contact the developer: **liuxialai25+mdp@gmail.com** (answered within 15 business days).
+For anything else, contact the developer: **mdp.supporter+mdp@gmail.com** (answered within 15 business days).
 
 ## Verify it yourself
 
