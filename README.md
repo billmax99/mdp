@@ -1,5 +1,7 @@
 # MD+ — 微信里收到的文档，都能舒服地看
 
+[English](overseas/README.md) | 中文
+
 ![版本](https://img.shields.io/badge/version-2.4.1-blue) ![平台](https://img.shields.io/badge/platform-Android%207.0%2B-green) ![许可](https://img.shields.io/badge/license-MIT-orange) ![离线](https://img.shields.io/badge/%E7%A6%BB%E7%BA%BF-%E9%9B%B6%E6%9D%83%E9%99%90-brightgreen)
 
 MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到的文件打不开」这个场景而生：
