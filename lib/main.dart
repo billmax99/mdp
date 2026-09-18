@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:hmd/build_info.dart';
+import 'package:hmd/strings.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -34,9 +35,7 @@ final themes = <String, (Color, Color, Color)>{
   'green': (const Color(0xFFCDE8CF), const Color(0xFFDFF2E1), const Color(0xFF24352A)),
   'blue': (const Color(0xFFD9E7F2), const Color(0xFFE6F0F8), const Color(0xFF22313F)),
 };
-const themeNames = {
-  'light': '浅色', 'dark': '深色', 'paper': '纸白', 'warm': '淡暖', 'green': '绿豆沙', 'blue': '淡青',
-};
+// 主题显示名走 strings.dart 的 theme_* 键（中/英）
 
 late SharedPreferences prefs;
 final appFont = ValueNotifier<double>(18); // 阅读正文字号
@@ -57,6 +56,7 @@ Future<void> initPrefs() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initPrefs();
+  initStrings(Platform.localeName); // 出海：中文系统=zh，其余系统用英文文案
   runApp(const HmdApp());
 }
 
@@ -509,8 +509,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _ingestFile(String src) async {
     final f = File(src);
-    if (!await f.exists()) return _toast('无法访问该文件');
-    final name = safeName(f.uri.pathSegments.isNotEmpty ? f.uri.pathSegments.last : '未命名.md');
+    if (!await f.exists()) return _toast(s('err_access'));
+    final name = safeName(f.uri.pathSegments.isNotEmpty ? f.uri.pathSegments.last : s('untitled'));
     final dst = File('${(await docsDir()).path}${Platform.pathSeparator}$name');
     // 同名覆盖会顶掉旧副本，且旧标注将锚到新内容上错位——须用户确认
     if (dst.existsSync() && _recent.any((x) => x.name == name)) {
@@ -518,11 +518,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('替换同名文件？'),
-          content: Text('已有「$name」的记录，替换后内容更新，但旧标注可能因位置变化而错位。'),
+          title: Text(s('replace_title')),
+          content: Text(s('replace_msg').replaceFirst('{name}', name)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('替换')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s('cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(s('replace'))),
           ],
         ),
       );
@@ -531,7 +531,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await f.copy(dst.path);
     } catch (_) {
-      return _toast('导入失败');
+      return _toast(s('err_import'));
     }
     await _open(RecentRec(name, DateTime.now().millisecondsSinceEpoch));
   }
@@ -541,7 +541,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!await File(p).exists()) {
       setState(() => _recent.remove(rec));
       await saveRecent(_recent);
-      return _toast('文件不存在，已从列表移除');
+      return _toast(s('err_gone'));
     }
     _recent
       ..removeWhere((r) => r.name == rec.name)
@@ -564,10 +564,10 @@ class _HomeScreenState extends State<HomeScreen> {
     await saveRecent(_recent);
     if (!mounted) return;
     messenger.showSnackBar(SnackBar(
-      content: Text('已删除「${r.name}」'),
+      content: Text(s('deleted').replaceFirst('{name}', r.name)),
       duration: const Duration(seconds: 5),
       action: SnackBarAction(
-        label: '撤销',
+        label: s('undo'),
         onPressed: () {
           setState(() => _recent.insert(0, r));
           saveRecent(_recent);
@@ -607,11 +607,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('删除这条记录？'),
-        content: Text('「${r.name}」的应用内副本与标注会一并删除。'),
+        title: Text(s('del_title')),
+        content: Text(s('del_msg').replaceFirst('{name}', r.name)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s('cancel'))),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(s('delete'))),
         ],
       ),
     );
@@ -622,14 +622,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清空全部记录？'),
-        content: const Text('所有文件的应用内副本与标注会一并删除，不可恢复。'),
+        title: Text(s('clear_title')),
+        content: Text(s('clear_msg')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s('cancel'))),
           FilledButton(
               style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('清空')),
+              child: Text(s('clear'))),
         ],
       ),
     );
@@ -638,7 +638,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _recent.clear());
     await saveRecent(_recent);
     await _purgeFiles(names, alsoPos: true);
-    _toast('已清空');
+    _toast(s('cleared'));
   }
 
   void _toast(String msg) {
@@ -658,7 +658,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const Text('MD+',
                 style: TextStyle(fontSize: 34, fontWeight: FontWeight.w700, height: 1.25)),
             const SizedBox(height: 4),
-            const Text('微信里收到的文档，都能舒服地看',
+            Text(s('home_tagline'),
                 style: TextStyle(fontSize: 14, color: iosGray)),
             const SizedBox(height: 22),
             SizedBox(
@@ -672,7 +672,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 onPressed: _pick,
                 icon: const Icon(Icons.folder_open_outlined, size: 26),
-                label: const Text('打开 .md 文件'),
+                label: Text(s('open_btn')),
               ),
             ),
             const SizedBox(height: 28),
@@ -681,12 +681,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
                 decoration: BoxDecoration(
                     color: card, borderRadius: BorderRadius.circular(16)),
-                child: const Column(children: [
-                  Icon(Icons.file_open_outlined, size: 46, color: iosGray),
-                  SizedBox(height: 12),
-                  Text('还没有文档', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-                  SizedBox(height: 6),
-                  Text('点上面的按钮选择文件；在微信里也可以\n选"用其他应用打开"直接跳到本应用',
+                child: Column(children: [
+                  const Icon(Icons.file_open_outlined, size: 46, color: iosGray),
+                  const SizedBox(height: 12),
+                  Text(s('empty_title'), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Text(s('empty_hint'),
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 14, color: iosGray, height: 1.5)),
                 ]),
@@ -695,7 +695,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Padding(
                 padding: const EdgeInsets.only(left: 12, bottom: 8),
                 child: Row(children: [
-                  const Text('最近',
+                  Text(s('recent'),
                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: iosGray)),
                   const Spacer(),
                   TextButton(
@@ -705,7 +705,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         minimumSize: const Size(0, 30),
                         textStyle: const TextStyle(fontSize: 13)),
-                    child: const Text('清空'),
+                    child: Text(s('clear')),
                   ),
                 ]),
               ),
@@ -725,7 +725,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
             const SizedBox(height: 18),
             Text(
-              'MD+ v$appVersion · 构建 $buildDate',
+              'MD+ v$appVersion · ${s('built')} $buildDate',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 12, color: iosGray),
             ),
@@ -882,25 +882,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
           _content = await f.readAsString();
         case DocKind.docx:
           _content = await extractDocxText(widget.path);
-          if (_content!.isEmpty) _error = '未能从文档中提取到文本';
+          if (_content!.isEmpty) _error = s('err_docx_empty');
         case DocKind.epub:
           _html = await extractEpubHtml(widget.path);
-          if (_html!.isEmpty) _error = '未能解析此 EPUB 文件';
+          if (_html!.isEmpty) _error = s('err_epub');
         case DocKind.pdf:
           break; // PdfViewer 自行加载
       }
     } on FileSystemException {
-      _error = '文件不存在或无法读取';
+      _error = s('err_missing');
     } on FormatException {
       // ponytail: 非 UTF-8 编码用 Latin-1 兜底（中文文档几乎都是 UTF-8，走不到这）
       try {
         _content = await f.readAsString(encoding: latin1);
       } catch (_) {
-        _error = '文件编码无法识别';
+        _error = s('err_encoding');
       }
     } catch (_) {
       // zip 结构损坏、epub schema 异常等一切解析失败：给出可读提示而非崩溃
-      _error = '打开失败：文件可能已损坏或格式不受支持';
+      _error = s('err_open');
     }
     if (mounted) setState(() {});
     _restorePos();
@@ -1288,7 +1288,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     if (_kind == DocKind.epub) {
       return [
         for (var i = 0; i < _html!.length; i++)
-          (1, epubChapterTitle(_html![i], i).isEmpty ? '第 ${i + 1} 章' : epubChapterTitle(_html![i], i), i)
+          (1, epubChapterTitle(_html![i], i).isEmpty ? s('chapter').replaceFirst('{n}', '${i + 1}') : epubChapterTitle(_html![i], i), i)
       ];
     }
     if (_kind != DocKind.md || _content == null) return const [];
@@ -1333,7 +1333,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final ol = _outline();
     if (ol.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(_kind == DocKind.pdf ? '此 PDF 无书签（引擎暂不支持）' : '此文档没有可导航的标题')));
+          content: Text(_kind == DocKind.pdf ? s('no_outline_pdf') : s('no_outline'))));
       return;
     }
     showModalBottomSheet(
@@ -1345,7 +1345,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
             child: Row(children: [
-              const Text('目录', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(s('outline'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.close, size: 22),
@@ -1530,7 +1530,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('背景色', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(s('theme_sheet'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 14,
@@ -1577,7 +1577,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                               width: 3),
                         ),
                         alignment: Alignment.center,
-                        child: Text(themeNames[e.key]!,
+                        child: Text(s('theme_${e.key}'),
                             style: TextStyle(color: e.value.$3, fontSize: 15, fontWeight: FontWeight.w600)),
                       ),
                     ),
@@ -1625,17 +1625,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.menu_book_outlined, size: 24),
-            tooltip: '目录',
+            tooltip: s('outline'),
             onPressed: _showOutline,
           ),
           IconButton(
             icon: const Icon(Icons.search, size: 24),
-            tooltip: '搜索',
+            tooltip: s('search'),
             onPressed: () => setState(() => _searchOpen = true),
           ),
           IconButton(
             icon: const Icon(Icons.bookmarks_outlined, size: 24),
-            tooltip: '标注列表',
+            tooltip: s('marks'),
             onPressed: _showMarksPanel,
           ),
         ],
@@ -1658,13 +1658,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   iconSize: 28,
                   onPressed: fs > minFont ? () => _setFont(fs - 1) : null,
                   icon: const Icon(Icons.text_decrease_rounded),
-                  tooltip: '减小字号',
+                  tooltip: s('font_smaller'),
                 ),
                 IconButton(
                   iconSize: 28,
                   onPressed: fs < maxFont ? () => _setFont(fs + 1) : null,
                   icon: const Icon(Icons.text_increase_rounded),
-                  tooltip: '增大字号',
+                  tooltip: s('font_bigger'),
                 ),
                 SizedBox(
                   height: 26,
@@ -1674,7 +1674,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   iconSize: 26,
                   onPressed: _showThemeSheet,
                   icon: const Icon(Icons.palette_outlined),
-                  tooltip: '背景色',
+                  tooltip: s('theme_sheet'),
                 ),
               ]),
             ),
@@ -1711,25 +1711,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
           autofocus: true,
           onChanged: _onQueryChanged,
           style: const TextStyle(fontSize: 17),
-          decoration: const InputDecoration(
-              hintText: '搜索正文…', border: InputBorder.none, isDense: true),
+          decoration: InputDecoration(
+              hintText: s('search_hint'), border: InputBorder.none, isDense: true),
         ),
       ),
       actions: [
         Padding(padding: const EdgeInsets.only(right: 4), child: Center(child: counter)),
         IconButton(
           icon: const Icon(Icons.keyboard_arrow_up, size: 26),
-          tooltip: '上一个',
+          tooltip: s('prev'),
           onPressed: () => _stepSearch(-1),
         ),
         IconButton(
           icon: const Icon(Icons.keyboard_arrow_down, size: 26),
-          tooltip: '下一个',
+          tooltip: s('next'),
           onPressed: () => _stepSearch(1),
         ),
         IconButton(
           icon: const Icon(Icons.close, size: 22),
-          tooltip: '关闭搜索',
+          tooltip: s('close_search'),
           onPressed: _closeSearch,
         ),
       ],
@@ -1790,11 +1790,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 child: Row(children: [
                   TextButton(
                     onPressed: () => _addPdfMark(false),
-                    child: const Text('划线', style: TextStyle(color: Colors.white, fontSize: 16)),
+                    child: Text(s('underline'), style: TextStyle(color: Colors.white, fontSize: 16)),
                   ),
                   TextButton(
                     onPressed: () => _addPdfMark(true),
-                    child: const Text('高亮', style: TextStyle(color: Colors.white, fontSize: 16)),
+                    child: Text(s('highlight'), style: TextStyle(color: Colors.white, fontSize: 16)),
                   ),
                 ]),
               ),
@@ -1852,8 +1852,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     return rel - 96 >= 4 ? rel - 96 : 4.0;
                   }(),
                   child: markToolbar([
-                    ('划线', () => _markFromSelection(false), iosBlue),
-                    ('高亮', () => _markFromSelection(true), hlYellow),
+                    (s('underline'), () => _markFromSelection(false), iosBlue),
+                    (s('highlight'), () => _markFromSelection(true), hlYellow),
                   ]),
                 );
               }),
@@ -1949,8 +1949,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 return rel - 96 >= 4 ? rel - 96 : 4.0;
               }(),
               child: markToolbar([
-                ('划线', () => _markFromSelection(false), iosBlue),
-                ('高亮', () => _markFromSelection(true), hlYellow),
+                (s('underline'), () => _markFromSelection(false), iosBlue),
+                (s('highlight'), () => _markFromSelection(true), hlYellow),
               ]),
             ),
           // 点击标注弹出的工具条（与选词菜单同款），点其他处关闭
@@ -1962,12 +1962,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ? _tapMenuMark!.$2.top - 70
                   : _tapMenuMark!.$2.bottom + 12,
               child: markToolbar([
-                ('删除', () {
+                (s('delete'), () {
                   final mk = _tapMenuMark!.$1;
                   setState(() => _tapMenuMark = null);
                   _deleteMark(mk);
                 }, Colors.redAccent),
-                ('复制', () {
+                (s('copy'), () {
                   Clipboard.setData(ClipboardData(text: _tapMenuMark!.$1.text));
                   _showCopied();
                   setState(() => _tapMenuMark = null);
@@ -1985,7 +1985,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.75),
                     borderRadius: BorderRadius.circular(10)),
-                child: const Text('已复制',
+                child: Text(s('copied'),
                     style: TextStyle(color: Colors.white, fontSize: 14)),
               ),
             ),
@@ -2092,7 +2092,7 @@ class _MarksPanelState extends State<MarksPanel> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
           child: Row(children: [
-            Text('标注（${_list.length}）',
+            Text(s('marks_count').replaceFirst('{n}', '${_list.length}'),
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             const Spacer(),
             IconButton(
@@ -2106,7 +2106,7 @@ class _MarksPanelState extends State<MarksPanel> {
           child: TextField(
             onChanged: (v) => setState(() => _q = v),
             decoration: InputDecoration(
-              hintText: '搜索标注内容…',
+              hintText: s('search_marks'),
               prefixIcon: const Icon(Icons.search, size: 24),
               isDense: true,
               filled: true,
@@ -2119,7 +2119,7 @@ class _MarksPanelState extends State<MarksPanel> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
           child: Row(children: [
-            for (final (i, label) in ['全部', '高亮', '划线'].indexed)
+            for (final (i, label) in [s('all'), s('highlight'), s('underline')].indexed)
               Padding(
                 padding: EdgeInsets.only(right: i == 0 ? 0 : 10),
                 child: ChoiceChip(
@@ -2141,7 +2141,7 @@ class _MarksPanelState extends State<MarksPanel> {
         Expanded(
           child: shown.isEmpty
               ? const Center(
-                  child: Text('暂无标注', style: TextStyle(color: iosGray, fontSize: 15)))
+                  child: Text(s('no_marks'), style: TextStyle(color: iosGray, fontSize: 15)))
               : ListView.builder(
                   itemCount: shown.length,
                   itemBuilder: (_, i) {
@@ -2168,7 +2168,7 @@ class _MarksPanelState extends State<MarksPanel> {
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(fontSize: 15, height: 1.4)),
                                   if (m.isPdf)
-                                    Text('第 ${m.page} 页',
+                                    Text(s('page_n').replaceFirst('{n}', '${m.page}'),
                                         style: const TextStyle(fontSize: 12, color: iosGray)),
                                 ],
                               ),

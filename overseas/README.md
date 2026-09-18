@@ -8,7 +8,7 @@ MD+ is an offline document reader for Android. It opens **Markdown, TXT, PDF, EP
 
 No ads. No analytics. No account. And no permissions at all — **not even network access**.
 
-> **Status:** the app UI is currently Chinese-only. English localization is the next milestone. Everything below describes what you'll get today; the reader itself is fully usable regardless of UI language.
+> **Status:** multilingual UI — English, 中文， 日本語， 한국어, Deutsch, Français, following your system language — ships with the next release. Until then the current APK is Chinese-only; the reader itself is fully usable regardless of UI language. Spotted a clunky translation? [Tell us](https://github.com/billmax99/mdp/discussions) — these are first-pass translations.
 
 ## Why it exists
 
