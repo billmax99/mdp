@@ -44,9 +44,11 @@ MD+ requests zero Android permissions, including network. It physically cannot s
 - [Privacy Policy](PRIVACY.md)
 - [Open Source Licenses](LICENSES.md)
 
-## Feedback & contact
+## Support & feedback
 
-Bugs and ideas → [GitHub Issues](https://github.com/billmax99/mdp/issues). That's the fastest route, and it's public so answers help everyone.
+**Two zero-cost ways to say thanks if MD+ makes your reading a little nicer: give the repo a ⭐ on [GitHub](https://github.com/billmax99/mdp), or [buy me a coffee on Ko-fi](https://ko-fi.com/mdplus) ☕**
+
+Bugs and ideas → [GitHub Issues](https://github.com/billmax99/mdp/issues) — fastest route, and it's public so answers help everyone. Questions and impressions → [Discussions](https://github.com/billmax99/mdp/discussions).
 
 Privacy questions or anything personal → **mdp.supporter+mdp@gmail.com**
 
