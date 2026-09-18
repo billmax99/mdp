@@ -299,7 +299,7 @@ const Map<String, Map<String, String>> kStrings = {
     'err_access': "Impossible d'accéder à ce fichier",
     'untitled': 'Sans titre.md',
     'replace_title': 'Remplacer le fichier du même nom ?',
-    'replace_msg': 'Une entrée pour « {name} » existe déjà. Le contenu sera mis à jour, mais les anciennes annotations risquent d'être décalées.',
+    'replace_msg': "Une entrée pour « {name} » existe déjà. Le contenu sera mis à jour, mais les anciennes annotations risquent d'être décalées.",
     'cancel': 'Annuler',
     'replace': 'Remplacer',
     'err_import': "Échec de l'importation",
