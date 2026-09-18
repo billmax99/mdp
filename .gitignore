@@ -68,3 +68,6 @@ key.properties
 
 # 收款码原图（只入库加水印成品，见 tool/watermark_sponsor.py）
 /docs/sponsor/*_raw.png
+
+# 小红书等平台营销截图与成图上传包（本地素材不入库，成图脚本 tool/make_xhs_pack.py）
+/publish/pic/
