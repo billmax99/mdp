@@ -2140,7 +2140,7 @@ class _MarksPanelState extends State<MarksPanel> {
         ),
         Expanded(
           child: shown.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(s('no_marks'), style: TextStyle(color: iosGray, fontSize: 15)))
               : ListView.builder(
                   itemCount: shown.length,

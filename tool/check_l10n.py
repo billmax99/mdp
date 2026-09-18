@@ -54,7 +54,8 @@ for lg in langs:
             ph_bad.append("%s:%s" % (lg, k))
 print("[3] 占位符与 zh 不一致：%s" % ph_bad)
 
-old = subprocess.run(["git", "show", "HEAD:lib/main.dart"], capture_output=True).stdout.decode("utf-8")
+# 基线钉死在 l10n 化之前的那笔提交：锁住 zh 文案与原字面量逐字节一致（test/ 按 zh 断言）
+old = subprocess.run(["git", "show", "9e78d57:lib/main.dart"], capture_output=True).stdout.decode("utf-8")
 not_found = []
 for k, v in tables["zh"].items():
     if ph.search(v) or k.startswith("theme_"):
