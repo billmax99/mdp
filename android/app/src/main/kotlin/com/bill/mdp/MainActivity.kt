@@ -1,4 +1,4 @@
-package com.bill.hmd
+package com.bill.mdp
 
 import io.flutter.embedding.android.FlutterActivity
 
