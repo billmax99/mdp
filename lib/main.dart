@@ -164,6 +164,8 @@ DocKind kindOf(String name) {
     case 'pdf':
       return DocKind.pdf;
     case 'epub':
+    case 'html': // html/htm 走 epub 渲染管线（单章）
+    case 'htm':
       return DocKind.epub;
     case 'docx':
       return DocKind.docx;
@@ -359,6 +361,14 @@ String epubChapterTitle(String html, int idx) {
 }
 
 Future<List<String>> extractEpubHtml(String path) async {
+  final ext = path.toLowerCase().split('.').last;
+  if (ext == 'html' || ext == 'htm') {
+    // 单文件网页：整文件当单章，走 epub 同一渲染管线（标注/搜索/主题全量复用）。
+    // ponytail: 仅 UTF-8（FormatException 落 _load 的 latin1 兜底会乱码，GBK 网页
+    // 需 gbk codec 依赖，遇到真实样本再升级）；本地相对路径图片不解包
+    final t = await File(path).readAsString();
+    return t.trim().isEmpty ? [] : [t];
+  }
   final zip = ZipDecoder().decodeBytes(await File(path).readAsBytes());
   final files = {for (final f in zip) f.name: f};
 
@@ -501,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _pick() async {
     final f = await FilePicker.pickFile(
       type: FileType.custom,
-      allowedExtensions: ['md', 'markdown', 'mdown', 'txt', 'pdf', 'epub', 'docx'],
+      allowedExtensions: ['md', 'markdown', 'mdown', 'txt', 'pdf', 'epub', 'docx', 'html', 'htm'],
     );
     final p = f?.path;
     if (p != null && p.isNotEmpty) await _ingestFile(p);

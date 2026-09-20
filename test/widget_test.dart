@@ -191,6 +191,28 @@ void main() {
     expect(epubChapterTitle('<html><body><p>x</p></body></html>', 2), '');
   });
 
+  test('kindOf html/htm 归 epub 管线', () {
+    expect(kindOf('a.html'), DocKind.epub);
+    expect(kindOf('a.HTM'), DocKind.epub);
+  });
+
+  test('extractEpubHtml 单文件 html/htm 整文件单章', () async {
+    final p = _tmp('t页.html', utf8.encode('<html><body><h1>网页标题</h1><p>网页正文</p></body></html>'));
+    final htmls = await extractEpubHtml(p);
+    expect(htmls.length, 1);
+    expect(htmls.single, contains('网页正文'));
+    final p2 = _tmp('t旧.htm', utf8.encode('<p>旧式网页</p>'));
+    expect((await extractEpubHtml(p2)).single, contains('旧式网页'));
+  });
+
+  test('extractEpubHtml 空白 html 返回空列表（触发错误提示）', () async {
+    final p = _tmp('t空.html', utf8.encode('  \n '));
+    expect(await extractEpubHtml(p), isEmpty);
+  });
+
+  // html 的 ReaderScreen 渲染无法在 testWidgets 验证（fake 时钟驱动不了
+  // dart:io 读真文件，与 epub 同理），由模拟器/真机实测覆盖
+
   test('safeName 截断超长文件名并保留扩展名', () {
     final r = safeName('${'超' * 200}.md');
     expect(r.length, 80);
