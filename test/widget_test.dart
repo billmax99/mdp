@@ -210,6 +210,39 @@ void main() {
     expect(await extractEpubHtml(p), isEmpty);
   });
 
+  test('applyStylesheet 类选择器注入 inline（background 简写转纯色）', () {
+    final out = applyStylesheet(
+        '<html><head><style>.card{background:#fff;padding:16px;box-sizing:border-box}</style></head>'
+        '<body><div class="card">x</div></body></html>');
+    expect(out, contains('background-color: #fff'));
+    expect(out, contains('padding:16px'));
+    expect(RegExp(r'style="[^"]*box-sizing').hasMatch(out), isFalse); // 不支持的属性不注入
+  });
+
+  test('applyStylesheet 后代链命中、inline 已有属性不被覆盖', () {
+    final out = applyStylesheet(
+        '<style>.item .insight{background:#f1f8e9;color:#2e7d32}</style>'
+        '<body><div class="item"><div class="insight" style="color:#f00">y</div>'
+        '<div class="insight">z</div></div></body>');
+    expect(out, contains('background-color: #f1f8e9'));
+    expect(out, contains('color:#f00')); // inline 优先保留
+    expect(out, contains('color:#2e7d32')); // 无 inline 冲突的子元素生效
+  });
+
+  test('applyStylesheet 伪类规则跳过、无 style 块原样返回', () {
+    final out1 = applyStylesheet(
+        '<style>.a:last-child{background:#fff}</style><body><p class="a">x</p></body>');
+    expect(out1, isNot(contains('background-color')));
+    expect(applyStylesheet('<p>plain</p>'), '<p>plain</p>');
+  });
+
+  test('extractEpubHtml html 文件经过样式表预处理', () async {
+    final p = _tmp('t样.html', utf8.encode(
+        '<style>.track{background:#fff3e0}</style><body><span class="track">轨道</span></body>'));
+    final htmls = await extractEpubHtml(p);
+    expect(htmls.single, contains('background-color: #fff3e0'));
+  });
+
   // html 的 ReaderScreen 渲染无法在 testWidgets 验证（fake 时钟驱动不了
   // dart:io 读真文件，与 epub 同理），由模拟器/真机实测覆盖
 

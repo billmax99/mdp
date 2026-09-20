@@ -14,6 +14,8 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:hmd/build_info.dart';
 import 'package:hmd/strings.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as htmlparser;
 import 'package:markdown/markdown.dart' as md;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -360,6 +362,112 @@ String epubChapterTitle(String html, int idx) {
   return name;
 }
 
+// 把 <style> 块规则合入元素 inline style——fwfh core 只认 inline 属性，
+// 存档网页的类选择器样式（.card{background:#fff}）原样传入会整块丢失。
+// ponytail: 手写极简匹配——tag / .class / tag.class / 后代链，含伪类/:id/
+// 属性选择器/@media 的规则整条跳过；background 简写仅取纯色；复杂 CSS
+// 遇真实样本再升级为 csslib 全量解析
+final _simpleSel = RegExp(r'^((?:\*|[a-zA-Z][a-zA-Z0-9]*)?)((?:\.[A-Za-z0-9_-]+)*)$');
+
+bool _elMatches(dom.Element el, String simple) {
+  final m = _simpleSel.firstMatch(simple.trim());
+  if (m == null || m.group(0)!.isEmpty) return false;
+  final tag = m.group(1)!;
+  if (tag.isNotEmpty && tag != '*' && el.localName?.toLowerCase() != tag.toLowerCase()) return false;
+  final classes = m.group(2)!;
+  if (classes.isNotEmpty) {
+    final need = classes.substring(1).split('.');
+    final have = el.className.split(RegExp(r'\s+')).toSet();
+    if (!need.every(have.contains)) return false;
+  }
+  return true;
+}
+
+bool _chainMatches(dom.Element el, List<String> parts) {
+  if (!_elMatches(el, parts.last)) return false;
+  var i = parts.length - 2;
+  dom.Node? a = el.parent;
+  while (i >= 0) {
+    while (a != null && (a is! dom.Element || !_elMatches(a, parts[i]))) {
+      a = a.parent;
+    }
+    if (a == null) return false;
+    i--;
+    a = a.parent;
+  }
+  return true;
+}
+
+// background 简写转 background-color：仅纯色（#hex/rgb()/常见色名），其余丢弃
+String _normalizeDecls(String decls) {
+  final out = <String>[];
+  for (var d in decls.split(';')) {
+    d = d.trim();
+    if (d.isEmpty) continue;
+    final i = d.indexOf(':');
+    if (i <= 0) continue;
+    final k = d.substring(0, i).trim().toLowerCase();
+    var v = d.substring(i + 1).trim();
+    if (k == 'background' || k == 'background-color') {
+      final plain = RegExp(r'^(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|[a-zA-Z]+)$').firstMatch(v);
+      if (plain == null) continue; // url()/渐变等不支持
+      out.add('background-color: $v');
+    } else if (k != 'box-sizing' && k != 'display' && k != 'font-family') {
+      out.add(d); // 透传：fwfh 不认识的属性自己忽略
+    }
+  }
+  return out.join('; ');
+}
+
+String applyStylesheet(String src) {
+  final doc = htmlparser.parse(src);
+  final sheets = doc.querySelectorAll('style');
+  if (sheets.isEmpty) return src;
+  final rules = <(List<String>, String)>[];
+  for (final s in sheets) {
+    final css = s.text.replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), '');
+    for (final m in RegExp(r'([^{}]+)\{([^{}]*)\}').allMatches(css)) {
+      final chain = m.group(1)!.trim().split(RegExp(r'\s+'));
+      if (chain.length > 1 && (chain.first.startsWith('@') || m.group(1)!.contains('@'))) continue;
+      if (!chain.every((c) => _simpleSel.hasMatch(c))) continue; // 伪类等不支持→跳过
+      final decls = _normalizeDecls(m.group(2)!);
+      if (decls.isNotEmpty) rules.add((chain, decls));
+    }
+  }
+  if (rules.isEmpty || doc.body == null) return src;
+  final els = <dom.Element>[];
+  void walk(dom.Node n) {
+    for (final c in n.nodes) {
+      if (c is dom.Element) els.add(c);
+      walk(c);
+    }
+  }
+  walk(doc.body!);
+  for (final el in els) {
+    final add = <String>[];
+    for (final (chain, decls) in rules) {
+      if (!_chainMatches(el, chain)) continue;
+      // inline 已有属性不被覆盖（CSS 优先级：inline > 样式表）
+      final have = <String>{};
+      for (var d in (el.attributes['style'] ?? '').split(';')) {
+        final i = d.indexOf(':');
+        if (i > 0) have.add(d.substring(0, i).trim().toLowerCase());
+      }
+      for (var d in decls.split(';')) {
+        final k = d.substring(0, d.indexOf(':')).trim().toLowerCase();
+        if (!have.contains(k)) add.add(d.trim());
+      }
+    }
+    if (add.isNotEmpty) {
+      final old = el.attributes['style'];
+      el.attributes['style'] = old == null || old.trim().isEmpty
+          ? add.join('; ')
+          : '$old; ${add.join('; ')}';
+    }
+  }
+  return doc.outerHtml;
+}
+
 Future<List<String>> extractEpubHtml(String path) async {
   final ext = path.toLowerCase().split('.').last;
   if (ext == 'html' || ext == 'htm') {
@@ -367,7 +475,8 @@ Future<List<String>> extractEpubHtml(String path) async {
     // ponytail: 仅 UTF-8（FormatException 落 _load 的 latin1 兜底会乱码，GBK 网页
     // 需 gbk codec 依赖，遇到真实样本再升级）；本地相对路径图片不解包
     final t = await File(path).readAsString();
-    return t.trim().isEmpty ? [] : [t];
+    if (t.trim().isEmpty) return [];
+    return [applyStylesheet(t)];
   }
   final zip = ZipDecoder().decodeBytes(await File(path).readAsBytes());
   final files = {for (final f in zip) f.name: f};
