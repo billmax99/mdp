@@ -259,7 +259,44 @@ void main() {
     expect(back.isHighlight, isTrue);
     expect(back.isPdf, isFalse);
     expect(back.page, 3);
+    expect(back.start, -1); // 未指定偏移的旧式构造 = 未知
     expect(Mark.fromJson('bad'), isNull);
+  });
+
+  test('Mark start 偏移持久化（json 键 s）', () {
+    final m = const Mark('id2', '文本', '前', '后', 1, false, false, 0, 42);
+    final back = Mark.fromJson(jsonDecode(jsonEncode(m.toJson())));
+    expect(back!.start, 42);
+    // 旧数据无 s 字段 → -1，走退化匹配
+    expect(Mark.fromJson({'i': 'x', 't': 'y'}), isNotNull);
+    expect(Mark.fromJson({'i': 'x', 't': 'y'})!.start, -1);
+  });
+
+  test('injectHtmlMarks 同文重复：start 偏移定位到第 N 次出现（非首现）', () {
+    const html = '<p>验证纯文本书写。验证纯文本书写。验证纯文本书写。</p>';
+    // html 坐标：'<p>'占3，重复3 的"验"在 3+8*2=19。划第 3 个重复，首现匹配会错画到第 1 个（位置3）
+    final m = const Mark('m1', '验证纯文本书写', '。', '。', 1, true, false, 0, 19);
+    final out = injectHtmlMarks(html, [m]);
+    expect(out.indexOf('<span'), 19); // 精确偏移生效
+    // 修复前路径（start=-1 旧数据）：before 匹配命中首现，行为不变
+    final mOld = const Mark('m2', '验证纯文本书写', '。', '。', 1, true, false, 0);
+    final outOld = injectHtmlMarks(html, [mOld]);
+    expect(outOld.indexOf('<span'), 11); // '。验证…'首现在10 → +1
+  });
+
+  test('injectHtmlMarks 多标注从后往前注入互不移位', () {
+    const html = '<p>甲乙丙丁甲乙丙丁</p>';
+    final a = const Mark('a', '甲', '', '', 1, true, false, 0, 3); // 第1个甲
+    final b = const Mark('b', '甲', '', '', 1, true, false, 0, 7); // 第2个甲
+    final out = injectHtmlMarks(html, [a, b]);
+    expect(RegExp('甲</span>.*<span').allMatches(out).length, 1); // 前者先闭合、后者后开（位置有序）
+    expect(out.indexOf('甲</span>'), lessThan(out.lastIndexOf('<span')));
+  });
+
+  test('injectHtmlMarks 精确偏移与内容不符时退化（防文档变更错位）', () {
+    const html = '<p>内容已改写。</p>';
+    final m = const Mark('m', '旧文本', '', '', 1, true, false, 0, 2); // start 处不是 m.text
+    expect(injectHtmlMarks(html, [m]), isNot(contains('#FFE066'))); // 校验+匹配双双失败→不注入
   });
 
   test('splitBlocks：代码块内空行不切断', () {

@@ -207,12 +207,20 @@ class Mark {
   final bool isHighlight; // true=色块 false=下划线
   final bool isPdf;
   final int page; // pdf=页码；epub=章节序号；md/txt/docx=块序号
-  const Mark(this.id, this.text, this.before, this.after, this.createdAt, this.isHighlight, this.isPdf, this.page);
-  Map<String, dynamic> toJson() => {'i': id, 't': text, 'b': before, 'a': after, 'c': createdAt, 'h': isHighlight, 'p': isPdf, 'n': page};
+  // 块内/章节内偏移（保存时源文坐标）。同文重复时 before+text 匹配必命中首现，
+  // 有了精确偏移才能画在用户划的那一处；-1=旧数据/未知，渲染退化字符串匹配。
+  // md 语法标记（#/**）渲染后被吃掉，源文偏移在渲染文本上校验失败同样退化，安全。
+  final int start;
+  const Mark(this.id, this.text, this.before, this.after, this.createdAt, this.isHighlight, this.isPdf, this.page, [this.start = -1]);
+  Map<String, dynamic> toJson() => {
+        'i': id, 't': text, 'b': before, 'a': after, 'c': createdAt,
+        'h': isHighlight, 'p': isPdf, 'n': page,
+        if (start >= 0) 's': start,
+      };
   static Mark? fromJson(dynamic j) => j is Map && j['i'] is String && j['t'] is String
       ? Mark(j['i'], j['t'], j['b'] is String ? j['b'] : '', j['a'] is String ? j['a'] : '',
           (j['c'] as num?)?.toInt() ?? 0, j['h'] == true, j['p'] == true,
-          (j['n'] as num?)?.toInt() ?? 0)
+          (j['n'] as num?)?.toInt() ?? 0, (j['s'] as num?)?.toInt() ?? -1)
       : null;
 }
 
@@ -315,13 +323,27 @@ List<(int, int)> findMatches(String text, String q) {
   return out;
 }
 
-// epub：把锚点处文本包上带样式的 span（text 含 HTML 转义字符时失配跳过）
+// epub：把锚点处文本包上带样式的 span（text 含 HTML 转义字符时失配跳过）。
+// 精确偏移优先（substring 校验防文档变更错位），失败退化 before+text 匹配；
+// 注入按位置从后往前，前面的注入不会挤移后面标注的偏移
 String injectHtmlMarks(String html, Iterable<Mark> ms) {
-  var s = html;
+  final anchors = <(int, Mark)>[];
   for (final m in ms) {
-    final i = s.indexOf(m.before + m.text);
-    if (i < 0) continue;
-    final start = i + m.before.length;
+    int start;
+    if (m.start >= 0 &&
+        m.start + m.text.length <= html.length &&
+        html.substring(m.start, m.start + m.text.length) == m.text) {
+      start = m.start;
+    } else {
+      final i = html.indexOf(m.before + m.text);
+      if (i < 0) continue;
+      start = i + m.before.length;
+    }
+    anchors.add((start, m));
+  }
+  anchors.sort((a, b) => b.$1.compareTo(a.$1));
+  var s = html;
+  for (final (start, m) in anchors) {
     final span = m.isHighlight
         ? '<span style="background-color:#FFE066">'
         : '<span style="text-decoration:underline;text-underline-offset:3px">';
@@ -1087,10 +1109,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
       final lineEnd = src.indexOf('\n', i + text.length);
       final b = src.substring((i - 16).clamp(lineStart, src.length), i);
       final e = (i + text.length + 16).clamp(0, lineEnd < 0 ? src.length : lineEnd);
-      final page = _html!.indexWhere((h) => h.contains(b + text) || h.contains(text));
+      // 偏移反推所在章（contains 找章在同文重复时会错章），并算章内偏移
+      var page = 0, base = 0;
+      for (var k = 0; k < _html!.length; k++) {
+        if (i < base + _html![k].length || k == _html!.length - 1) {
+          page = k;
+          break;
+        }
+        base += _html![k].length + 1; // +1 = join('\n') 的换行
+      }
       setState(() => _marks = [
             ..._marks,
-            Mark(id, text, b, src.substring(i + text.length, e), now, hl, false, page < 0 ? 0 : page)
+            Mark(id, text, b, src.substring(i + text.length, e), now, hl, false, page, i - base)
           ]);
       await saveMarks(widget.title, _marks);
       return;
@@ -1130,7 +1160,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
           now,
           hl,
           false,
-          pb));
+          pb,
+          ss - offs[pb])); // 块内偏移（源文坐标；md 语法标记致渲染文本坐标不同时校验失败自然退化）
     }
     if (segMarks.isEmpty) return;
     setState(() => _marks = [..._marks, ...segMarks]);
@@ -1230,8 +1261,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
           final runText = (r.text as InlineSpan).toPlainText();
           if (runText.isEmpty) continue;
           for (final m in _marks.where((m) => !m.isPdf && m.page == bi)) {
-            var i = m.before.isEmpty ? -1 : runText.indexOf(m.before + m.text);
-            i = i >= 0 ? i + m.before.length : runText.indexOf(m.text);
+            // 精确偏移优先（同文重复不再命中首现），substring 校验防文档变更错位；
+            // 旧数据/-1/校验失败退化 before+text 匹配，行为与修复前一致
+            int i;
+            if (m.start >= 0 &&
+                m.start + m.text.length <= runText.length &&
+                runText.substring(m.start, m.start + m.text.length) == m.text) {
+              i = m.start;
+            } else {
+              final bi2 = m.before.isEmpty ? -1 : runText.indexOf(m.before + m.text);
+              i = bi2 >= 0 ? bi2 + m.before.length : runText.indexOf(m.text);
+            }
             if (i < 0) continue;
             final boxes = (r.getBoxesForSelection as dynamic)(
                 TextSelection(baseOffset: i, extentOffset: i + m.text.length)) as List;
