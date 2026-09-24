@@ -71,3 +71,9 @@ key.properties
 
 # 小红书等平台营销截图与成图上传包（本地素材不入库，成图脚本 tool/make_xhs_pack.py）
 /publish/pic/
+
+# 双机工作流文件（本地保留，不入公开仓库）
+AGENTS.md
+TODO.md
+WRAP.md
+开发机任务书*.md
