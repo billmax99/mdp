@@ -2,7 +2,7 @@
 
 [English](overseas/README.md) | 中文
 
-![版本](https://img.shields.io/badge/version-2.4.1-blue) ![平台](https://img.shields.io/badge/platform-Android%207.0%2B-green) ![许可](https://img.shields.io/badge/license-MIT-orange) ![离线](https://img.shields.io/badge/%E7%A6%BB%E7%BA%BF-%E9%9B%B6%E6%9D%83%E9%99%90-brightgreen)
+![版本](https://img.shields.io/badge/version-2.4.2-blue) ![平台](https://img.shields.io/badge/platform-Android%207.0%2B-green) ![许可](https://img.shields.io/badge/license-MIT-orange) ![离线](https://img.shields.io/badge/%E7%A6%BB%E7%BA%BF-%E9%9B%B6%E6%9D%83%E9%99%90-brightgreen)
 
 MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到的文件打不开」这个场景而生：
 在微信里点开文件，点「用其它程序打开」，选 MD+，剩下的交给它。
@@ -15,9 +15,11 @@ MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到�
 
 现代手机选 arm64 包即可（更小，约 25 MB）。之前装过测试版的话，先卸载再装正式版。
 
+**鸿蒙（HarmonyOS）版正在开发中**，敬请期待。
+
 ## 它能做什么
 
-- **五种格式都能看**：Markdown、TXT、PDF、EPUB 电子书、Word 文档
+- **六种格式都能看**：Markdown、TXT、PDF、EPUB 电子书、Word 文档、网页 HTML（保存的网页带原样式排版阅读）
 - **划线和高亮**：长按文字即可标注，自动保存，随时翻回来看
 - **全文搜索**：关键词在第几处，一键直达
 - **目录跳转**：长文档、电子书按章节直接翻

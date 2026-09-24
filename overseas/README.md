@@ -2,13 +2,13 @@
 
 [English] | [中文](../README.md)
 
-![Version](https://img.shields.io/badge/version-2.4.1-blue) ![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-green) ![License](https://img.shields.io/badge/license-MIT-orange) ![Offline](https://img.shields.io/badge/offline-zero%20permissions-brightgreen)
+![Version](https://img.shields.io/badge/version-2.4.2-blue) ![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-green) ![License](https://img.shields.io/badge/license-MIT-orange) ![Offline](https://img.shields.io/badge/offline-zero%20permissions-brightgreen)
 
-MD+ is an offline document reader for Android. It opens **Markdown, TXT, PDF, EPUB and Word files** in one clean, focused view — with highlights, full-text search, a table of contents and reading themes.
+MD+ is an offline document reader for Android. It opens **Markdown, TXT, PDF, EPUB, Word and HTML files** in one clean, focused view — with highlights, full-text search, a table of contents and reading themes.
 
 No ads. No analytics. No account. And no permissions at all — **not even network access**.
 
-> **Status:** multilingual UI — English, 中文， 日本語， 한국어, Deutsch, Français, following your system language — ships with the next release. Until then the current APK is Chinese-only; the reader itself is fully usable regardless of UI language. Spotted a clunky translation? [Tell us](https://github.com/billmax99/mdp/discussions) — these are first-pass translations.
+> **Status:** a HarmonyOS version is in development. Multilingual UI — English, 中文， 日本語， 한국어, Deutsch, Français, following your system language — ships with the next release. Until then the current APK is Chinese-only; the reader itself is fully usable regardless of UI language. Spotted a clunky translation? [Tell us](https://github.com/billmax99/mdp/discussions) — these are first-pass translations.
 
 ## Why it exists
 
@@ -24,7 +24,7 @@ The first install will ask you to allow installs from your browser or Files app.
 
 ## Features
 
-- **Five formats, one reader** — Markdown (fully rendered), TXT, PDF, EPUB e-books, Word (.docx)
+- **Six formats, one reader** — Markdown (fully rendered), TXT, PDF, EPUB e-books, Word (.docx), saved HTML pages (original colors and layout)
 - **Highlight & underline** — long-press any passage; wavy underlines and highlight blocks are saved per document, permanently
 - **Full-text search** — see every hit at a glance and jump straight to the third occurrence
 - **Table of contents** — chapter navigation for long documents and e-books
