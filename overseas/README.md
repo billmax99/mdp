@@ -8,7 +8,7 @@ MD+ is an offline document reader for Android. It opens **Markdown, TXT, PDF, EP
 
 No ads. No analytics. No account. And no permissions at all — **not even network access**.
 
-> **Status:** a HarmonyOS preview (v0.1.10, API 12) is available from [Releases](https://gitee.com/bill_zzx/mdp/releases). Multilingual UI — English, 中文， 日本語， 한국어, Deutsch, Français, following your system language — ships with the next release. Until then the current APK is Chinese-only; the reader itself is fully usable regardless of UI language. Spotted a clunky translation? [Tell us](https://github.com/billmax99/mdp/discussions) — these are first-pass translations.
+> **Status:** a HarmonyOS preview (v0.1.10, API 12) is available from [Releases](https://gitee.com/bill_zzx/mdp/releases). Multilingual UI — English, 中文， 日本語， 한국어, Deutsch, Français, following your system language — ships with the next release. Until then the current APK is Chinese-only; the reader itself is fully usable regardless of UI language. Spotted a clunky translation? [Tell us](https://gitee.com/bill_zzx/mdp/issues) — these are first-pass translations.
 
 ## Why it exists
 
@@ -18,7 +18,7 @@ MD+ fixes exactly that, and does nothing else.
 
 ## Download
 
-Get the latest APK from [GitHub Releases](https://github.com/billmax99/mdp/releases/latest) (arm64 — works on virtually every Android phone from the last several years, ~25 MB).
+Get the latest APK from [GitHub Releases](https://gitee.com/bill_zzx/mdp/releases) (arm64 — works on virtually every Android phone from the last several years, ~25 MB).
 
 The first install will ask you to allow installs from your browser or Files app. That's the standard Android sideloading prompt, nothing unusual.
 
@@ -46,9 +46,9 @@ MD+ requests zero Android permissions, including network. It physically cannot s
 
 ## Support & feedback
 
-**Two zero-cost ways to say thanks if MD+ makes your reading a little nicer: give the repo a ⭐ on [GitHub](https://github.com/billmax99/mdp), or [buy me a coffee on Ko-fi](https://ko-fi.com/mdplus) ☕**
+**Two zero-cost ways to say thanks if MD+ makes your reading a little nicer: give the repo a ⭐ on [GitHub](https://gitee.com/bill_zzx/mdp), or [buy me a coffee on Ko-fi](https://ko-fi.com/mdplus) ☕**
 
-Bugs and ideas → [GitHub Issues](https://github.com/billmax99/mdp/issues) — fastest route, and it's public so answers help everyone. Questions and impressions → [Discussions](https://github.com/billmax99/mdp/discussions).
+Bugs and ideas → [GitHub Issues](https://gitee.com/bill_zzx/mdp/issues) — fastest route, and it's public so answers help everyone. Questions and impressions → [Discussions](https://gitee.com/bill_zzx/mdp/issues).
 
 Privacy questions or anything personal → **mdp.supporter+mdp@gmail.com**
 
