@@ -8,7 +8,7 @@ MD+ is an offline document reader for Android. It opens **Markdown, TXT, PDF, EP
 
 No ads. No analytics. No account. And no permissions at all — **not even network access**.
 
-> **Status:** a HarmonyOS version is in development. Multilingual UI — English, 中文， 日本語， 한국어, Deutsch, Français, following your system language — ships with the next release. Until then the current APK is Chinese-only; the reader itself is fully usable regardless of UI language. Spotted a clunky translation? [Tell us](https://github.com/billmax99/mdp/discussions) — these are first-pass translations.
+> **Status:** a HarmonyOS preview (v0.1.10, API 12) is available from [Releases](https://gitee.com/bill_zzx/mdp/releases). Multilingual UI — English, 中文， 日本語， 한국어, Deutsch, Français, following your system language — ships with the next release. Until then the current APK is Chinese-only; the reader itself is fully usable regardless of UI language. Spotted a clunky translation? [Tell us](https://github.com/billmax99/mdp/discussions) — these are first-pass translations.
 
 ## Why it exists
 

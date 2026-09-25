@@ -15,7 +15,7 @@ MD+ 是一个安卓手机上的本地文档阅读器，专为「微信里收到�
 
 现代手机选 arm64 包即可（更小，约 25 MB）。之前装过测试版的话，先卸载再装正式版。
 
-**鸿蒙（HarmonyOS）版正在开发中**，敬请期待。
+**鸿蒙（HarmonyOS）版预览已开放下载**（v0.1.10，API 12）：[Releases](https://gitee.com/bill_zzx/mdp/releases)
 
 ## 它能做什么
 
