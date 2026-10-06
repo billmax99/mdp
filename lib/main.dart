@@ -490,6 +490,33 @@ String applyStylesheet(String src) {
   return doc.outerHtml;
 }
 
+/// 程序型网页嗅探：含 canvas 或内联脚本体量大 → 该文件是"应用"而非文档。
+/// fwfh 不执行 JS，渲染出来的只有静态壳，页首须提示用户去浏览器打开。
+/// ponytail: 1.5KB 阈值是拍的（统计埋点≈百字节级，游戏/应用动辄数十 KB），
+/// 误报漏报等真实样本再调；升级路径=提示块配"用浏览器打开"按钮
+bool isJsAppHtml(String src) {
+  if (RegExp(r'<canvas\b', caseSensitive: false).hasMatch(src)) return true;
+  var n = 0;
+  for (final m
+      in RegExp(r'<script\b[^>]*>([\s\S]*?)</script>', caseSensitive: false)
+          .allMatches(src)) {
+    n += m.group(1)!.length;
+  }
+  return n > 1500;
+}
+
+String _jsAppNoticeDiv() =>
+    '<div style="border:1px solid #8a8f98;border-radius:8px;padding:10px 12px;'
+    'margin-bottom:12px;font-size:0.9em">🌐 ${s('js_web_notice')}</div>';
+
+/// 提示块插到 `<body>` 首位（无 body 的片段则前置），走同一渲染管线随主题显示
+String jsAppNotice(String html) {
+  final r = RegExp(r'<body\b[^>]*>', caseSensitive: false);
+  return r.hasMatch(html)
+      ? html.replaceFirstMapped(r, (m) => '${m.group(0)}${_jsAppNoticeDiv()}')
+      : _jsAppNoticeDiv() + html;
+}
+
 Future<List<String>> extractEpubHtml(String path) async {
   final ext = path.toLowerCase().split('.').last;
   if (ext == 'html' || ext == 'htm') {
@@ -498,7 +525,8 @@ Future<List<String>> extractEpubHtml(String path) async {
     // 需 gbk codec 依赖，遇到真实样本再升级）；本地相对路径图片不解包
     final t = await File(path).readAsString();
     if (t.trim().isEmpty) return [];
-    return [applyStylesheet(t)];
+    final one = applyStylesheet(t);
+    return [isJsAppHtml(t) ? jsAppNotice(one) : one];
   }
   final zip = ZipDecoder().decodeBytes(await File(path).readAsBytes());
   final files = {for (final f in zip) f.name: f};
